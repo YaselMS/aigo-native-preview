@@ -80,8 +80,8 @@ run("xcodebuild", [
 const application = exactlyOne(join(archive, "Products", "Applications"), ".app");
 const info = plist(join(application, "Info.plist"));
 assert.equal(info.CFBundleIdentifier, "dev.aigo.preview");
-assert.equal(info.CFBundleShortVersionString, "0.7.3");
-assert.equal(info.CFBundleVersion, "7003999");
+assert.equal(info.CFBundleShortVersionString, "0.7.4");
+assert.equal(info.CFBundleVersion, "7004999");
 assert.ok(info.UISupportedInterfaceOrientations?.includes("UIInterfaceOrientationLandscapeLeft"));
 assert.ok(info.UISupportedInterfaceOrientations?.includes("UIInterfaceOrientationLandscapeRight"));
 assert.ok(info.CFBundleSupportedPlatforms?.includes("iPhoneOS"), "Expected a physical-device app.");
@@ -96,7 +96,7 @@ const ipa = join(output, "Aigo-Preview-unsigned.ipa");
 run("ditto", ["-c", "-k", "--keepParent", "Payload", basename(ipa)], output);
 writeFileSync(join(output, "build-manifest.json"), `${JSON.stringify({
   app: "Aigo Preview",
-  preview: 2,
+  preview: 3,
   bundleIdentifier: info.CFBundleIdentifier,
   upstreamCommit: upstream,
   buildKitCommit: process.env.GITHUB_SHA ?? null,
@@ -111,4 +111,3 @@ writeFileSync(join(output, "build-manifest.json"), `${JSON.stringify({
   xcode: run("xcodebuild", ["-version"], appDirectory, true),
 }, null, 2)}\n`);
 console.log("Unsigned physical-device IPA packaged. Signing and iPhone execution remain unverified.");
-

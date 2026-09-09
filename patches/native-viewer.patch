@@ -1,8 +1,7 @@
 diff --git a/packages/app/app.config.js b/packages/app/app.config.js
-index 1e13997..c6ad38f 100644
 --- a/packages/app/app.config.js
 +++ b/packages/app/app.config.js
-@@ -9,6 +9,7 @@ const { getNativeReleaseVersion } = require("./native-release-version");
+@@ -9,6 +9,7 @@
  const appVariant = process.env.APP_VARIANT ?? "production";
  const isFdroidBuild = process.env.PASEO_FDROID_BUILD === "1";
  const isProfileBuild = process.env.PASEO_PROFILE_BUILD === "1";
@@ -10,7 +9,7 @@ index 1e13997..c6ad38f 100644
  
  const buildProfile = isFdroidBuild
    ? {
-@@ -91,17 +92,19 @@ const variants = {
+@@ -91,17 +92,19 @@
    },
  };
  
@@ -19,7 +18,7 @@ index 1e13997..c6ad38f 100644
 +const variant = isAigoPreview
 +  ? { name: "Aigo Preview", packageId: "dev.aigo.preview" }
 +  : (variants[appVariant] ?? variants.production);
-+const nativeReleaseVersion = getNativeReleaseVersion(isAigoPreview ? "0.7.3" : pkg.version);
++const nativeReleaseVersion = getNativeReleaseVersion(isAigoPreview ? "0.7.4" : pkg.version);
  
  export default {
    expo: {
@@ -35,7 +34,7 @@ index 1e13997..c6ad38f 100644
      userInterfaceStyle: "automatic",
      newArchEnabled: true,
      ios: {
-@@ -155,7 +158,7 @@ export default {
+@@ -155,7 +158,7 @@
            },
          },
        ],
@@ -44,12 +43,12 @@ index 1e13997..c6ad38f 100644
        "expo-audio",
        [
          "expo-gradle-jvmargs",
-@@ -186,11 +189,11 @@ export default {
+@@ -186,11 +189,11 @@
      extra: {
        fdroidBuild: isFdroidBuild,
        profileBuild: isProfileBuild,
 +      aigoNativePreview: isAigoPreview,
-+      ...(isAigoPreview ? { aigoPreviewLabel: "Aigo Preview 2" } : {}),
++      ...(isAigoPreview ? { aigoPreviewLabel: "Aigo Preview 3" } : {}),
        router: {},
 -      eas: {
 -        projectId: "0e7f65ce-0367-46c8-a238-2b65963d235a",
@@ -60,9 +59,290 @@ index 1e13997..c6ad38f 100644
 +    ...(isAigoPreview ? {} : { owner: "getpaseo" }),
    },
  };
+diff --git a/packages/app/src/components/root-error-boundary.test.tsx b/packages/app/src/components/root-error-boundary.test.tsx
+--- a/packages/app/src/components/root-error-boundary.test.tsx
++++ b/packages/app/src/components/root-error-boundary.test.tsx
+@@ -4,8 +4,14 @@
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ import { RootErrorFallback } from "./root-error-boundary";
+ 
+-const { runtime, theme } = vi.hoisted(() => ({
+-  runtime: { breakpoint: "xs" },
++const { setStringAsync } = vi.hoisted(() => ({
++  setStringAsync: vi.fn<(text: string) => Promise<void>>(),
++}));
++
++vi.mock("expo-clipboard", () => ({ setStringAsync }));
++
++const { viewport, theme } = vi.hoisted(() => ({
++  viewport: { width: 430, height: 932, scale: 1, fontScale: 1 },
+   theme: {
+     spacing: { 2: 8, 3: 12, 4: 16, 6: 24, 8: 32 },
+     borderWidth: { 1: 1 },
+@@ -34,9 +40,14 @@
+   StyleSheet: {
+     create: (factory: unknown) => (typeof factory === "function" ? factory(theme) : factory),
+   },
+-  useUnistyles: () => ({ theme, rt: runtime }),
++  useUnistyles: () => ({ theme }),
+   withUnistyles: (component: unknown) => component,
+ }));
++
++vi.mock("react-native", async (importOriginal) => {
++  const reactNative = await importOriginal<typeof import("react-native")>();
++  return { ...reactNative, useWindowDimensions: () => viewport };
++});
+ 
+ vi.mock("react-native-safe-area-context", () => ({
+   useSafeAreaInsets: () => ({ top: 47, right: 3, bottom: 34, left: 5 }),
+@@ -61,6 +72,8 @@
+   const container = document.createElement("div");
+   document.body.appendChild(container);
+   root = createRoot(container);
++  setStringAsync.mockReset();
++  setStringAsync.mockResolvedValue(undefined);
+ });
+ 
+ afterEach(() => {
+@@ -70,9 +83,9 @@
+ });
+ 
+ describe("RootErrorFallback", () => {
+-  for (const breakpoint of ["xs", "lg"]) {
+-    it(`keeps the safe-area header and retry action outside the scrollable details on ${breakpoint}`, () => {
+-      runtime.breakpoint = breakpoint;
++  for (const width of [430, 992]) {
++    it(`keeps the safe-area header and retry action outside the scrollable details at width ${width}`, () => {
++      viewport.width = width;
+       act(() => {
+         root?.render(<RootErrorFallback error={"failure\n".repeat(200)} onRetry={vi.fn()} />);
+       });
+@@ -92,4 +105,61 @@
+       expect(screen?.contains(retry)).toBe(true);
+     });
+   }
++
++  it("disables copy while writing the complete error details", async () => {
++    const error = "Error: rotation failed\n    at a-very-long-native-stack-frame";
++    let finishCopy: (() => void) | undefined;
++    setStringAsync.mockImplementationOnce(
++      () =>
++        new Promise<void>((resolve) => {
++          finishCopy = resolve;
++        }),
++    );
++    act(() => {
++      root?.render(<RootErrorFallback error={error} onRetry={vi.fn()} />);
++    });
++
++    const copy = document.querySelector(
++      '[data-testid="root-error-boundary-copy"]',
++    ) as HTMLButtonElement | null;
++    act(() => copy?.dispatchEvent(new window.MouseEvent("click", { bubbles: true })));
++
++    expect(setStringAsync).toHaveBeenCalledOnce();
++    expect(setStringAsync).toHaveBeenCalledWith(error);
++    expect(copy?.disabled).toBe(true);
++
++    await act(async () => finishCopy?.());
++
++    expect(copy?.disabled).toBe(false);
++    expect(copy?.textContent).toBe("common.states.copied");
++  });
++
++  it("shows an inline error when copying fails and lets the user retry", async () => {
++    setStringAsync.mockRejectedValueOnce(new Error("clipboard unavailable"));
++    act(() => {
++      root?.render(<RootErrorFallback error="rotation failed" onRetry={vi.fn()} />);
++    });
++
++    const copy = document.querySelector(
++      '[data-testid="root-error-boundary-copy"]',
++    ) as HTMLButtonElement | null;
++    await act(async () => {
++      copy?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
++      await Promise.resolve();
++    });
++
++    const copyError = document.querySelector('[data-testid="root-error-boundary-copy-error"]');
++    expect(copy?.disabled).toBe(false);
++    expect(copyError?.textContent).toBe("settings.diagnostics.app.copyFailed");
++
++    await act(async () => {
++      copy?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
++      await Promise.resolve();
++    });
++
++    expect(setStringAsync).toHaveBeenCalledTimes(2);
++    expect(setStringAsync).toHaveBeenLastCalledWith("rotation failed");
++    expect(copy?.textContent).toBe("common.states.copied");
++    expect(document.querySelector('[data-testid="root-error-boundary-copy-error"]')).toBeNull();
++  });
+ });
+diff --git a/packages/app/src/components/root-error-boundary.tsx b/packages/app/src/components/root-error-boundary.tsx
+--- a/packages/app/src/components/root-error-boundary.tsx
++++ b/packages/app/src/components/root-error-boundary.tsx
+@@ -1,4 +1,12 @@
+-import React, { Component, Fragment, type ErrorInfo, type ReactNode } from "react";
++import * as Clipboard from "expo-clipboard";
++import React, {
++  Component,
++  Fragment,
++  useCallback,
++  useState,
++  type ErrorInfo,
++  type ReactNode,
++} from "react";
+ import { Text, View } from "react-native";
+ import { useTranslation } from "react-i18next";
+ import { useSafeAreaInsets } from "react-native-safe-area-context";
+@@ -61,9 +69,17 @@
+ }
+ 
+ export function RootErrorFallback({ error, onRetry }: RootErrorFallbackProps) {
++  const [copyState, setCopyState] = useState<"idle" | "copying" | "copied" | "failed">("idle");
+   const { t } = useTranslation();
+   const insets = useSafeAreaInsets();
+   const isCompact = useIsCompactFormFactor();
++  const handleCopy = useCallback(() => {
++    setCopyState("copying");
++    void Clipboard.setStringAsync(error).then(
++      () => setCopyState("copied"),
++      () => setCopyState("failed"),
++    );
++  }, [error]);
+ 
+   const retry = (
+     <Button variant="default" onPress={onRetry} testID="root-error-boundary-retry">
+@@ -90,9 +106,27 @@
+           <Text style={styles.body}>{t("rootError.body")}</Text>
+         </View>
+         <View style={styles.details}>
+-          <Text style={styles.detailsLabel}>{t("rootError.details")}</Text>
++          <View style={styles.detailsHeader}>
++            <Text style={styles.detailsLabel}>{t("rootError.details")}</Text>
++            <Button
++              variant="ghost"
++              size="xs"
++              onPress={handleCopy}
++              loading={copyState === "copying"}
++              testID="root-error-boundary-copy"
++            >
++              {t(copyState === "copied" ? "common.states.copied" : "common.actions.copy")}
++            </Button>
++          </View>
++          {copyState === "failed" ? (
++            <Text style={styles.copyError} testID="root-error-boundary-copy-error">
++              {t("settings.diagnostics.app.copyFailed")}
++            </Text>
++          ) : null}
+           <ScrollableCodeSurface
+             maxHeight={isCompact ? undefined : DETAILS_MAX_HEIGHT}
++            horizontal={false}
++            selectable
+             style={styles.detailsSurface}
+             scrollStyle={styles.detailsScroll}
+             testID="root-error-boundary-details"
+@@ -142,10 +176,20 @@
+     flexShrink: 1,
+     gap: theme.spacing[2],
+   },
++  detailsHeader: {
++    flexDirection: "row",
++    alignItems: "center",
++    justifyContent: "space-between",
++    gap: theme.spacing[2],
++  },
+   detailsLabel: {
+     color: theme.colors.foregroundMuted,
+     fontSize: theme.fontSize.sm,
+     fontWeight: theme.fontWeight.medium,
++  },
++  copyError: {
++    color: theme.colors.destructive,
++    fontSize: theme.fontSize.sm,
+   },
+   detailsSurface: {
+     flexShrink: 1,
+diff --git a/packages/app/src/constants/layout-breakpoints.test.ts b/packages/app/src/constants/layout-breakpoints.test.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/app/src/constants/layout-breakpoints.test.ts
+@@ -0,0 +1,26 @@
++import { describe, expect, it } from "vitest";
++import { isCompactViewport } from "./layout-breakpoints";
++
++describe("compact viewport", () => {
++  it("keeps a native phone compact across rotation", () => {
++    expect(isCompactViewport(430, 932, true)).toBe(true);
++    expect(isCompactViewport(932, 430, true)).toBe(true);
++  });
++
++  it("keeps a full-size tablet wide in both orientations", () => {
++    expect(isCompactViewport(820, 1180, true)).toBe(false);
++    expect(isCompactViewport(1180, 820, true)).toBe(false);
++  });
++
++  it("allows a narrow native window to use compact navigation", () => {
++    expect(isCompactViewport(600, 1180, true)).toBe(true);
++    expect(isCompactViewport(720, 1180, true)).toBe(false);
++  });
++
++  it("preserves width-based web layout", () => {
++    expect(isCompactViewport(430, 932, false)).toBe(true);
++    expect(isCompactViewport(932, 430, false)).toBe(false);
++    expect(isCompactViewport(719, 900, false)).toBe(true);
++    expect(isCompactViewport(720, 900, false)).toBe(false);
++  });
++});
+diff --git a/packages/app/src/constants/layout-breakpoints.ts b/packages/app/src/constants/layout-breakpoints.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/app/src/constants/layout-breakpoints.ts
+@@ -0,0 +1,14 @@
++export const LAYOUT_BREAKPOINTS = {
++  xs: 0,
++  sm: 576,
++  md: 720,
++  lg: 992,
++  xl: 1200,
++};
++
++export function isCompactViewport(width: number, height: number, native: boolean): boolean {
++  // A phone remains a compact device when rotated. Changing the entire shell
++  // at landscape width would unmount its active panels and fullscreen viewer.
++  const layoutWidth = native ? Math.min(width, height) : width;
++  return layoutWidth < LAYOUT_BREAKPOINTS.md;
++}
+diff --git a/packages/app/src/constants/layout.ts b/packages/app/src/constants/layout.ts
+--- a/packages/app/src/constants/layout.ts
++++ b/packages/app/src/constants/layout.ts
+@@ -1,5 +1,6 @@
+-import { useUnistyles } from "react-native-unistyles";
++import { useWindowDimensions } from "react-native";
+ import { isWeb } from "@/constants/platform";
++import { isCompactViewport } from "./layout-breakpoints";
+ 
+ export const FOOTER_HEIGHT = 75;
+ 
+@@ -36,12 +37,11 @@
+ } from "./platform";
+ 
+ /**
+- * Reactive hook — re-renders the component when the breakpoint changes.
+- * Always use this instead of reading UnistylesRuntime.breakpoint directly.
++ * Reactive viewport policy shared by native and web navigation.
+  */
+ export function useIsCompactFormFactor(): boolean {
+-  const { rt } = useUnistyles();
+-  return rt.breakpoint === "xs" || rt.breakpoint === "sm";
++  const { width, height } = useWindowDimensions();
++  return isCompactViewport(width, height, !isWeb);
+ }
+ 
+ // SplitContainer relies on dnd-kit and DOM-backed accessibility helpers.
 diff --git a/packages/app/src/plugins/react-native/desktop-view-policy.test.ts b/packages/app/src/plugins/react-native/desktop-view-policy.test.ts
 new file mode 100644
-index 0000000..51128e2
 --- /dev/null
 +++ b/packages/app/src/plugins/react-native/desktop-view-policy.test.ts
 @@ -0,0 +1,86 @@
@@ -154,7 +434,6 @@ index 0000000..51128e2
 +});
 diff --git a/packages/app/src/plugins/react-native/desktop-view-policy.ts b/packages/app/src/plugins/react-native/desktop-view-policy.ts
 new file mode 100644
-index 0000000..ebab5dd
 --- /dev/null
 +++ b/packages/app/src/plugins/react-native/desktop-view-policy.ts
 @@ -0,0 +1,57 @@
@@ -217,7 +496,6 @@ index 0000000..ebab5dd
 +}
 diff --git a/packages/app/src/plugins/react-native/desktop-view.native.test.tsx b/packages/app/src/plugins/react-native/desktop-view.native.test.tsx
 new file mode 100644
-index 0000000..a6e48c3
 --- /dev/null
 +++ b/packages/app/src/plugins/react-native/desktop-view.native.test.tsx
 @@ -0,0 +1,171 @@
@@ -394,7 +672,6 @@ index 0000000..a6e48c3
 +});
 diff --git a/packages/app/src/plugins/react-native/desktop-view.native.tsx b/packages/app/src/plugins/react-native/desktop-view.native.tsx
 new file mode 100644
-index 0000000..2c9faf5
 --- /dev/null
 +++ b/packages/app/src/plugins/react-native/desktop-view.native.tsx
 @@ -0,0 +1,190 @@
@@ -590,7 +867,6 @@ index 0000000..2c9faf5
 +}));
 diff --git a/packages/app/src/plugins/react-native/desktop-view.tsx b/packages/app/src/plugins/react-native/desktop-view.tsx
 new file mode 100644
-index 0000000..c7d8b06
 --- /dev/null
 +++ b/packages/app/src/plugins/react-native/desktop-view.tsx
 @@ -0,0 +1,16 @@
@@ -611,7 +887,6 @@ index 0000000..c7d8b06
 +  text: { color: theme.colors.foreground },
 +}));
 diff --git a/packages/app/src/plugins/react-native/runtime.ts b/packages/app/src/plugins/react-native/runtime.ts
-index 4ab9f0a..29a168b 100644
 --- a/packages/app/src/plugins/react-native/runtime.ts
 +++ b/packages/app/src/plugins/react-native/runtime.ts
 @@ -1,5 +1,6 @@
@@ -623,7 +898,6 @@ index 4ab9f0a..29a168b 100644
 -export const pluginReactNativeRuntime = { Icon, Modal, useToast };
 +export const pluginReactNativeRuntime = { Icon, Modal, useToast, DesktopView };
 diff --git a/packages/app/src/push-notifications/index.native.ts b/packages/app/src/push-notifications/index.native.ts
-index 579c9a0..ff5a6e3 100644
 --- a/packages/app/src/push-notifications/index.native.ts
 +++ b/packages/app/src/push-notifications/index.native.ts
 @@ -1,7 +1,10 @@
@@ -638,10 +912,9 @@ index 579c9a0..ff5a6e3 100644
  }
  
 diff --git a/packages/app/src/screens/settings-screen.tsx b/packages/app/src/screens/settings-screen.tsx
-index 5e5e9be..638c3df 100644
 --- a/packages/app/src/screens/settings-screen.tsx
 +++ b/packages/app/src/screens/settings-screen.tsx
-@@ -91,6 +91,7 @@ import { isElectronRuntime } from "@/desktop/host";
+@@ -91,6 +91,7 @@
  import { useDesktopAppUpdater } from "@/desktop/updates/use-desktop-app-updater";
  import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
  import { resolveAppVersion } from "@/utils/app-version";
@@ -649,7 +922,7 @@ index 5e5e9be..638c3df 100644
  import { useAppDiagnosticStore } from "@/diagnostics/store";
  import { settingsStyles } from "@/styles/settings";
  import { THINKING_TONE_NATIVE_PCM_BASE64 } from "@/utils/thinking-tone.native-pcm";
-@@ -615,6 +616,13 @@ function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSection
+@@ -615,6 +616,13 @@
    );
  }
  
@@ -663,7 +936,7 @@ index 5e5e9be..638c3df 100644
  function normalizeVersion(version: string | null | undefined): string | null {
    const trimmed = version?.trim();
    if (!trimmed) return null;
-@@ -1195,7 +1203,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
+@@ -1195,7 +1203,7 @@
    const lastOpenedAddHostIntentRef = useRef<string | null>(null);
    const isDesktopApp = isElectronRuntime();
    const appVersion = resolveAppVersion();
@@ -672,11 +945,31 @@ index 5e5e9be..638c3df 100644
    const isCompactLayout = useIsCompactFormFactor();
    const insets = useSafeAreaInsets();
    const insetBottomStyle = useMemo(() => ({ paddingBottom: insets.bottom }), [insets.bottom]);
+diff --git a/packages/app/src/styles/unistyles.ts b/packages/app/src/styles/unistyles.ts
+--- a/packages/app/src/styles/unistyles.ts
++++ b/packages/app/src/styles/unistyles.ts
+@@ -1,15 +1,10 @@
+ import { StyleSheet } from "react-native-unistyles";
+ import { REGISTERED_THEMES } from "./theme";
++import { LAYOUT_BREAKPOINTS } from "@/constants/layout-breakpoints";
+ 
+ StyleSheet.configure({
+   themes: REGISTERED_THEMES,
+-  breakpoints: {
+-    xs: 0,
+-    sm: 576,
+-    md: 720,
+-    lg: 992,
+-    xl: 1200,
+-  },
++  breakpoints: LAYOUT_BREAKPOINTS,
+   settings: {
+     adaptiveThemes: true,
+   },
 diff --git a/packages/plugin/src/react-native.ts b/packages/plugin/src/react-native.ts
-index 30f4440..d72e3b2 100644
 --- a/packages/plugin/src/react-native.ts
 +++ b/packages/plugin/src/react-native.ts
-@@ -29,8 +29,14 @@ export interface ToastApi {
+@@ -29,8 +29,14 @@
    error(message: string): void;
  }
  
@@ -691,3 +984,46 @@ index 30f4440..d72e3b2 100644
  export declare function useToast(): ToastApi;
  
  export type { PluginIconProps } from "./contracts.js";
+diff --git a/patches/react-native-gesture-handler+2.28.0.patch b/patches/react-native-gesture-handler+2.28.0.patch
+--- a/patches/react-native-gesture-handler+2.28.0.patch
++++ b/patches/react-native-gesture-handler+2.28.0.patch
+@@ -224,3 +224,39 @@
+      }
+  
+      this.markAsOutOfBounds(adaptedEvent.pointerId);
++diff --git a/node_modules/react-native-gesture-handler/src/handlers/gestures/GestureDetector/useMountReactions.ts b/node_modules/react-native-gesture-handler/src/handlers/gestures/GestureDetector/useMountReactions.ts
++--- a/node_modules/react-native-gesture-handler/src/handlers/gestures/GestureDetector/useMountReactions.ts
+++++ b/node_modules/react-native-gesture-handler/src/handlers/gestures/GestureDetector/useMountReactions.ts
++@@ -27,6 +27,8 @@
++ ) {
++   useEffect(() => {
++     return MountRegistry.addMountListener((gesture) => {
+++      // Layout teardown precedes passive subscription cleanup.
+++      if (!state.isMounted) return;
++       // At this point the ref in the gesture config should be updated, so we can check if one of the gestures
++       // set in a relation with the gesture got mounted. If so, we need to update the detector to propagate
++       // the changes to the native side.
++diff --git a/node_modules/react-native-gesture-handler/lib/module/handlers/gestures/GestureDetector/useMountReactions.js b/node_modules/react-native-gesture-handler/lib/module/handlers/gestures/GestureDetector/useMountReactions.js
++--- a/node_modules/react-native-gesture-handler/lib/module/handlers/gestures/GestureDetector/useMountReactions.js
+++++ b/node_modules/react-native-gesture-handler/lib/module/handlers/gestures/GestureDetector/useMountReactions.js
++@@ -17,6 +17,8 @@
++ export function useMountReactions(updateDetector, state) {
++   useEffect(() => {
++     return MountRegistry.addMountListener(gesture => {
+++      // Layout teardown precedes passive subscription cleanup.
+++      if (!state.isMounted) return;
++       // At this point the ref in the gesture config should be updated, so we can check if one of the gestures
++       // set in a relation with the gesture got mounted. If so, we need to update the detector to propagate
++       // the changes to the native side.
++diff --git a/node_modules/react-native-gesture-handler/lib/commonjs/handlers/gestures/GestureDetector/useMountReactions.js b/node_modules/react-native-gesture-handler/lib/commonjs/handlers/gestures/GestureDetector/useMountReactions.js
++--- a/node_modules/react-native-gesture-handler/lib/commonjs/handlers/gestures/GestureDetector/useMountReactions.js
+++++ b/node_modules/react-native-gesture-handler/lib/commonjs/handlers/gestures/GestureDetector/useMountReactions.js
++@@ -21,6 +21,8 @@
++ function useMountReactions(updateDetector, state) {
++   (0, _react.useEffect)(() => {
++     return _mountRegistry.MountRegistry.addMountListener(gesture => {
+++      // Layout teardown precedes passive subscription cleanup.
+++      if (!state.isMounted) return;
++       // At this point the ref in the gesture config should be updated, so we can check if one of the gestures
++       // set in a relation with the gesture got mounted. If so, we need to update the detector to propagate
++       // the changes to the native side.

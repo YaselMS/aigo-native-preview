@@ -66,8 +66,9 @@ jobs:
 
       - name: Check viewer navigation and plugin behavior
         run: |
+          node scripts/verify-gesture-lifecycle.cjs paseo
           cd paseo/packages/app
-          npx vitest run src/plugins/react-native/desktop-view-policy.test.ts src/plugins/react-native/desktop-view.native.test.tsx --bail=1
+          npm run test -- --project unit src/plugins/react-native/desktop-view-policy.test.ts src/plugins/react-native/desktop-view.native.test.tsx src/constants/layout-breakpoints.test.ts src/components/root-error-boundary.test.tsx --bail=1
           cd ../../..
           ln -s ../paseo/node_modules aigo-native-desktop/node_modules
           cd aigo-native-desktop
