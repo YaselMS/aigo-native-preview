@@ -1,6 +1,6 @@
 # Aigo Preview iPhone build kit
 
-This folder is a standalone source-only build repository layout. It prepares an unsigned native Paseo client with Aigo's embedded desktop viewer. It has not been compiled with Xcode or installed on an iPhone yet.
+This folder is a standalone source-only build repository layout. It prepares an unsigned native Paseo client with Aigo's embedded desktop viewer. The first native Release archive and unsigned IPA passed on the GitHub macOS runner. Signing, installation and actual iPhone behavior remain unverified. See [build evidence](https://github.com/YaselMS/aigo-native-preview/actions/runs/34307725184).
 
 ## Before using it
 
@@ -24,6 +24,6 @@ The preview deliberately has no native remote push registration. A signing servi
 
 ## Validation boundary
 
-Windows checks completed: pinned dependency installation, workspace dependency builds, app/SDK TypeScript checks, repository lint, 15 viewer navigation cases, three plugin behavior tests, preview identity validation, build-script syntax, patch application against the pinned source, and an iOS Hermes JavaScript export (36.9 MB). These do not execute native iPhone code. The first Mac runner build must establish CocoaPods, native compilation, and IPA packaging. The first iPhone test must establish signed installation, launch, pairing, chat, embedded viewer input, and releasing control when leaving the viewer or backgrounding the app.
+Windows checks completed: pinned dependency installation, workspace dependency builds, app/SDK TypeScript checks, repository lint, 15 viewer navigation cases, three plugin behavior tests, preview identity validation, build-script syntax, patch application against the pinned source, and an iOS Hermes JavaScript export (36.9 MB). These do not execute native iPhone code. The macOS runner has now passed CocoaPods, native compilation, and IPA packaging; the downloaded IPA also passed identity, arm64, bundled JavaScript and SHA-256 checks. The first iPhone test must establish signed installation, launch, pairing, chat, embedded viewer input, and releasing control when leaving the viewer or backgrounding the app.
 
-The workflow uses no automatic release or store submission. It does not start the Windows viewer or put a viewer address in the app bundle.
+The build workflow uses no automatic release or store submission. A separate manually triggered `publish-preview.yml` publishes only the first verified IPA and manifest as a GitHub prerelease, after checking its exact recorded SHA-256. It uses the temporary GitHub job token, with no Apple or Signulous credentials. It does not start the Windows viewer or put a viewer address in the app bundle.

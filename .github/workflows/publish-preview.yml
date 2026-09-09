@@ -1,0 +1,49 @@
+name: Publish verified iPhone preview 1
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: publish-preview-1
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Check out release notes
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Download the already completed build
+        run: gh run download 34307725184 --name aigo-preview-unsigned-iphone --dir artifact
+      - name: Verify the exact reviewed IPA
+        shell: python
+        run: |
+          import hashlib, json, pathlib
+          root = pathlib.Path('artifact')
+          manifest = json.loads((root / 'build-manifest.json').read_text())
+          expected = 'dcaf415bd48a1b579fa79167376a26d9958a4db1e04339e199488d042f7ec73d'
+          assert manifest['buildKitCommit'] == '0d3fe210ea4ef09b228c65b1dd6bd1d59f441678'
+          assert manifest['bundleIdentifier'] == 'dev.aigo.preview'
+          assert manifest['signed'] is False
+          assert manifest['sha256'] == expected
+          assert hashlib.sha256((root / 'Aigo-Preview-unsigned.ipa').read_bytes()).hexdigest() == expected
+      - name: Publish the unsigned test download
+        run: >-
+          gh release create v0.1.0-preview.1
+          artifact/Aigo-Preview-unsigned.ipa artifact/build-manifest.json
+          --target 0d3fe210ea4ef09b228c65b1dd6bd1d59f441678
+          --title 'Aigo Preview — iPhone test 1'
+          --notes-file RELEASE-NOTES.md
+          --prerelease

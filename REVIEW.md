@@ -1,8 +1,8 @@
-# Proposed public source package
+# Public source package review
 
-Proposed repository: `YaselMS/aigo-native-preview`. Not created or published yet.
+Published with explicit user approval: `YaselMS/aigo-native-preview`.
 
-Only the contents of this build-kit directory would be uploaded:
+Only the contents of this build-kit directory are published:
 
 - `patches/native-viewer.patch`: eight changed/new Paseo files implementing the native viewer, navigation checks/tests, preview identity, and preview-only push-registration gate.
 - `aigo-native-desktop/`: plugin implementation, synthetic tests, package/typecheck configuration, and instructions. No installed dependencies.
@@ -12,7 +12,7 @@ Only the contents of this build-kit directory would be uploaded:
 
 The workflow downloads the public upstream source at its fixed commit. It does not upload the local checkout, runtime session files, project/chat data, screenshots, pairing records, or signing material. Test URLs and IDs are synthetic. The built application obtains host pairing and viewer access at runtime, not from bundled secrets.
 
-Proposed action after approval: create that public repository, upload this package, and run its manual build on a standard GitHub macOS runner. The workflow retains only the unsigned IPA and build manifest for one day and does not submit anything to Apple or Signulous. Actual iPhone signing/install remains a user step.
+The approved source publication and standard GitHub macOS build are complete. The unsigned native archive and downloaded IPA checks passed. The build workflow retains only the unsigned IPA and build manifest for one day and does not submit anything to Apple or Signulous. The separate manual publication workflow checks the exact first-build SHA-256 and publishes those two files as a GitHub prerelease for a stable phone download. `RELEASE-NOTES.md` records the validation boundary. Actual iPhone signing/install remains a user step.
 
 First phone acceptance test:
 
