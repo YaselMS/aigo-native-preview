@@ -2,7 +2,7 @@
 
 A source-only build kit for the native Paseo-derived Aigo client. Preview 2 adds landscape rotation, a fullscreen embedded desktop, and a distinct About label: version 0.7.3, build 7003999. The upstream chat protocol remains based on Paseo 0.7.2.
 
-The first preview was signed, installed and tested on an iPhone. Chat, embedded viewing, fixture input, pinch/pan and release on background/navigation worked. Preview 2 still needs its own native build and device acceptance.
+The first preview was signed, installed and tested on an iPhone. Chat, embedded viewing, fixture input, pinch/pan and release on background/navigation worked. Preview 2 native compilation and independent IPA verification passed. Physical iPhone acceptance remains pending. [Download Preview 2](https://github.com/YaselMS/aigo-native-preview/releases/tag/v0.1.0-preview.2).
 
 ## Build and install
 
