@@ -1,0 +1,8 @@
+/paseo/
+**/node_modules/
+*.ipa
+*.xcarchive/
+*.mobileprovision
+*.p12
+*.log
+.env*

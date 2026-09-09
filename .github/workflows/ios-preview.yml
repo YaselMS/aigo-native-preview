@@ -1,0 +1,100 @@
+name: Build unsigned Aigo Preview for iPhone
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aigo-ios-preview
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.event.repository.private == false
+    # Standard public-repository runner. Do not change to a billed larger runner.
+    runs-on: macos-15
+    timeout-minutes: 75
+    env:
+      CI: "1"
+      AIGO_PREVIEW_BUILD: "1"
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      ONNXRUNTIME_NODE_INSTALL: skip
+      LEFTHOOK: "0"
+    steps:
+      - name: Check out this build kit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Check out pinned Paseo source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: getpaseo/paseo
+          ref: 9400a49af670fdb5db4af58e73f8df98588dbea9
+          path: paseo
+          persist-credentials: false
+
+      - name: Use the upstream Node version
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.20.0
+
+      - name: Apply the reviewed native viewer patch
+        working-directory: paseo
+        run: |
+          test "$(git rev-parse HEAD)" = 9400a49af670fdb5db4af58e73f8df98588dbea9
+          git apply --check ../patches/native-viewer.patch
+          git apply ../patches/native-viewer.patch
+
+      - name: Install pinned dependencies
+        working-directory: paseo
+        run: npm ci
+
+      - name: Build app dependencies and terminal assets
+        working-directory: paseo
+        run: |
+          npm run build:app-deps
+          npm run build:terminal-webview --workspace=@getpaseo/app
+
+      - name: Check client types and lint
+        working-directory: paseo
+        run: |
+          npm run typecheck --workspace=@getpaseo/app --workspace=@getpaseo/plugin
+          npm run lint
+
+      - name: Check viewer navigation and plugin behavior
+        run: |
+          cd paseo/packages/app
+          npx vitest run src/plugins/react-native/desktop-view-policy.test.ts --bail=1
+          cd ../../..
+          ln -s ../paseo/node_modules aigo-native-desktop/node_modules
+          cd aigo-native-desktop
+          npm run typecheck
+          npm run lint
+          npm test
+
+      - name: Verify preview identity before generating the iOS project
+        working-directory: paseo/packages/app
+        run: |
+          npx expo config --type prebuild --json > "$RUNNER_TEMP/aigo-expo-config.json"
+          node ../../../scripts/verify-preview-config.mjs "$RUNNER_TEMP/aigo-expo-config.json"
+
+      - name: Generate iOS project and install CocoaPods
+        working-directory: paseo/packages/app
+        run: npx expo prebuild --platform ios --non-interactive
+
+      - name: Archive an unsigned device build and package the IPA
+        run: node scripts/archive-ios.mjs paseo "$RUNNER_TEMP/aigo-ios"
+
+      - name: Save only the IPA and build manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aigo-preview-unsigned-iphone
+          path: |
+            ${{ runner.temp }}/aigo-ios/Aigo-Preview-unsigned.ipa
+            ${{ runner.temp }}/aigo-ios/build-manifest.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0

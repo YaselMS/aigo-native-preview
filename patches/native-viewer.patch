@@ -1,0 +1,321 @@
+diff --git a/packages/app/app.config.js b/packages/app/app.config.js
+index 1e13997..800ca59 100644
+--- a/packages/app/app.config.js
++++ b/packages/app/app.config.js
+@@ -9,6 +9,7 @@ const { getNativeReleaseVersion } = require("./native-release-version");
+ const appVariant = process.env.APP_VARIANT ?? "production";
+ const isFdroidBuild = process.env.PASEO_FDROID_BUILD === "1";
+ const isProfileBuild = process.env.PASEO_PROFILE_BUILD === "1";
++const isAigoPreview = process.env.AIGO_PREVIEW_BUILD === "1";
+ 
+ const buildProfile = isFdroidBuild
+   ? {
+@@ -91,17 +92,19 @@ const variants = {
+   },
+ };
+ 
+-const variant = variants[appVariant] ?? variants.production;
++const variant = isAigoPreview
++  ? { name: "Aigo Preview", packageId: "dev.aigo.preview" }
++  : (variants[appVariant] ?? variants.production);
+ const nativeReleaseVersion = getNativeReleaseVersion(pkg.version);
+ 
+ export default {
+   expo: {
+     name: variant.name,
+-    slug: "voice-mobile",
++    slug: isAigoPreview ? "aigo-preview" : "voice-mobile",
+     version: nativeReleaseVersion.appVersion,
+     orientation: "portrait",
+     icon: "./assets/images/icon.png",
+-    scheme: "paseo",
++    scheme: isAigoPreview ? "aigo-preview" : "paseo",
+     userInterfaceStyle: "automatic",
+     newArchEnabled: true,
+     ios: {
+@@ -155,7 +158,7 @@ export default {
+           },
+         },
+       ],
+-      ...buildProfile.notificationPlugins,
++      ...(isAigoPreview ? [] : buildProfile.notificationPlugins),
+       "expo-audio",
+       [
+         "expo-gradle-jvmargs",
+@@ -186,11 +189,10 @@ export default {
+     extra: {
+       fdroidBuild: isFdroidBuild,
+       profileBuild: isProfileBuild,
++      aigoNativePreview: isAigoPreview,
+       router: {},
+-      eas: {
+-        projectId: "0e7f65ce-0367-46c8-a238-2b65963d235a",
+-      },
++      ...(isAigoPreview ? {} : { eas: { projectId: "0e7f65ce-0367-46c8-a238-2b65963d235a" } }),
+     },
+-    owner: "getpaseo",
++    ...(isAigoPreview ? {} : { owner: "getpaseo" }),
+   },
+ };
+diff --git a/packages/app/src/plugins/react-native/desktop-view-policy.test.ts b/packages/app/src/plugins/react-native/desktop-view-policy.test.ts
+new file mode 100644
+index 0000000..9186b95
+--- /dev/null
++++ b/packages/app/src/plugins/react-native/desktop-view-policy.test.ts
+@@ -0,0 +1,37 @@
++import { describe, expect, it } from "vitest";
++import { allowsDesktopNavigation, desktopOrigin } from "./desktop-view-policy";
++
++const origin = "https://aigo-native-test.trycloudflare.com";
++const link = `${origin}/#${"a".repeat(64)}`;
++
++describe("native desktop navigation", () => {
++  it("accepts the private viewer entry and its authenticated root navigation", () => {
++    expect(desktopOrigin(link)).toBe(origin);
++    expect(allowsDesktopNavigation(link, origin)).toBe(true);
++    expect(allowsDesktopNavigation(`${origin}/`, origin)).toBe(true);
++  });
++
++  it.each([
++    "https://example.com/#" + "a".repeat(64),
++    link.replace("https:", "http:"),
++    link.replace(".com/", ".com.attacker.test/"),
++    link.replace("/#", "/other#"),
++    link.replace("/#", "/?token="),
++    link.replace("https://", "https://user:secret@"),
++    `${origin}/#short`,
++    "file:///test",
++    "javascript:alert(1)",
++  ])("rejects an invalid or unexpected desktop link: %s", (value) => {
++    expect(desktopOrigin(value)).toBe(null);
++  });
++
++  it.each([
++    "https://example.com/",
++    "paseo://pair",
++    "file:///test",
++    `${origin}/credentials`,
++    `${origin}/?redirect=elsewhere`,
++  ])("keeps navigation within the viewer root: %s", (value) => {
++    expect(allowsDesktopNavigation(value, origin)).toBe(false);
++  });
++});
+diff --git a/packages/app/src/plugins/react-native/desktop-view-policy.ts b/packages/app/src/plugins/react-native/desktop-view-policy.ts
+new file mode 100644
+index 0000000..1f5a3cd
+--- /dev/null
++++ b/packages/app/src/plugins/react-native/desktop-view-policy.ts
+@@ -0,0 +1,27 @@
++export function desktopOrigin(value: string): string | null {
++  let url: URL;
++  try {
++    url = new URL(value);
++  } catch {
++    return null;
++  }
++  const trustedEndpoint =
++    url.protocol === "https:" &&
++    /^[a-z0-9-]+\.trycloudflare\.com$/.test(url.hostname) &&
++    url.port === "" &&
++    url.username === "" &&
++    url.password === "" &&
++    url.pathname === "/" &&
++    url.search === "" &&
++    /^#[a-f0-9]{64}$/.test(url.hash);
++  return trustedEndpoint ? url.origin : null;
++}
++
++export function allowsDesktopNavigation(value: string, origin: string): boolean {
++  try {
++    const url = new URL(value);
++    return url.origin === origin && url.pathname === "/" && url.search === "";
++  } catch {
++    return false;
++  }
++}
+diff --git a/packages/app/src/plugins/react-native/desktop-view.native.tsx b/packages/app/src/plugins/react-native/desktop-view.native.tsx
+new file mode 100644
+index 0000000..1013c74
+--- /dev/null
++++ b/packages/app/src/plugins/react-native/desktop-view.native.tsx
+@@ -0,0 +1,112 @@
++import { useCallback, useEffect, useMemo, useState } from "react";
++import { ActivityIndicator, AppState, Pressable, Text, View } from "react-native";
++import { StyleSheet } from "react-native-unistyles";
++import { WebView, type WebViewNavigation } from "react-native-webview";
++import type { DesktopViewProps } from "@getpaseo/plugin/react-native";
++import { usePaneFocus } from "@/panels/pane-context";
++import { useRetainedPanelActive } from "@/components/retained-panel";
++import { allowsDesktopNavigation, desktopOrigin } from "./desktop-view-policy";
++
++export function DesktopView({ url }: DesktopViewProps) {
++  const { isInteractive } = usePaneFocus();
++  const panelActive = useRetainedPanelActive();
++  const [appState, setAppState] = useState(AppState.currentState);
++  useEffect(() => {
++    const listener = AppState.addEventListener("change", setAppState);
++    return () => listener.remove();
++  }, []);
++  const origin = desktopOrigin(url);
++  if (!origin) {
++    return <DesktopMessage message="The desktop link is invalid. Reconnect from this panel." />;
++  }
++  const active = panelActive && isInteractive && appState === "active";
++  if (!active) {
++    // Destroy the WebView, rather than retaining a hidden socket that renews human ownership.
++    return <DesktopMessage message="Desktop disconnected while this panel is inactive." />;
++  }
++  return <ConnectedDesktop key={url} url={url} origin={origin} />;
++}
++
++function ConnectedDesktop({ url, origin }: DesktopViewProps & { origin: string }) {
++  const [failed, setFailed] = useState(false);
++  const [loading, setLoading] = useState(true);
++  const source = useMemo(() => ({ uri: url }), [url]);
++  const retry = useCallback(() => {
++    setLoading(true);
++    setFailed(false);
++  }, []);
++  const fail = useCallback(() => setFailed(true), []);
++  const loaded = useCallback(() => setLoading(false), []);
++  const allowNavigation = useCallback(
++    (request: WebViewNavigation) => allowsDesktopNavigation(request.url, origin),
++    [origin],
++  );
++  if (failed) {
++    return (
++      <View style={styles.message}>
++        <Text style={styles.text}>
++          Desktop connection failed. Check that the PC viewer is running.
++        </Text>
++        <Pressable accessibilityRole="button" onPress={retry} style={styles.button}>
++          <Text style={styles.text}>Retry connection</Text>
++        </Pressable>
++      </View>
++    );
++  }
++  return (
++    <View style={styles.container}>
++      <WebView
++        source={source}
++        style={styles.container}
++        containerStyle={styles.container}
++        incognito
++        cacheEnabled={false}
++        sharedCookiesEnabled={false}
++        thirdPartyCookiesEnabled={false}
++        // Handle every attempted navigation ourselves; don't dispatch rejected links to other apps.
++        originWhitelist={["*"]}
++        onShouldStartLoadWithRequest={allowNavigation}
++        onOpenWindow={fail}
++        setSupportMultipleWindows
++        allowsLinkPreview={false}
++        allowFileAccess={false}
++        allowFileAccessFromFileURLs={false}
++        allowUniversalAccessFromFileURLs={false}
++        mixedContentMode="never"
++        bounces={false}
++        automaticallyAdjustContentInsets={false}
++        contentInsetAdjustmentBehavior="never"
++        onLoadEnd={loaded}
++        onError={fail}
++        onHttpError={fail}
++        onContentProcessDidTerminate={fail}
++        onRenderProcessGone={fail}
++      />
++      {loading ? (
++        <ActivityIndicator style={styles.loading} accessibilityLabel="Connecting to desktop" />
++      ) : null}
++    </View>
++  );
++}
++
++function DesktopMessage({ message }: { message: string }) {
++  return (
++    <View style={styles.message}>
++      <Text style={styles.text}>{message}</Text>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create((theme) => ({
++  container: { flex: 1, backgroundColor: theme.colors.surface0 },
++  message: {
++    flex: 1,
++    padding: 16,
++    gap: 16,
++    justifyContent: "center",
++    backgroundColor: theme.colors.surface0,
++  },
++  text: { color: theme.colors.foreground },
++  button: { padding: 12, borderRadius: 8, backgroundColor: theme.colors.surface1 },
++  loading: { position: "absolute", top: 16, alignSelf: "center" },
++}));
+diff --git a/packages/app/src/plugins/react-native/desktop-view.tsx b/packages/app/src/plugins/react-native/desktop-view.tsx
+new file mode 100644
+index 0000000..c7d8b06
+--- /dev/null
++++ b/packages/app/src/plugins/react-native/desktop-view.tsx
+@@ -0,0 +1,16 @@
++import { Text, View } from "react-native";
++import { StyleSheet } from "react-native-unistyles";
++import type { DesktopViewProps } from "@getpaseo/plugin/react-native";
++
++export function DesktopView(_props: DesktopViewProps) {
++  return (
++    <View style={styles.container}>
++      <Text style={styles.text}>Open this panel in Aigo Preview on your iPhone.</Text>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create((theme) => ({
++  container: { flex: 1, padding: 16, backgroundColor: theme.colors.surface0 },
++  text: { color: theme.colors.foreground },
++}));
+diff --git a/packages/app/src/plugins/react-native/runtime.ts b/packages/app/src/plugins/react-native/runtime.ts
+index 4ab9f0a..29a168b 100644
+--- a/packages/app/src/plugins/react-native/runtime.ts
++++ b/packages/app/src/plugins/react-native/runtime.ts
+@@ -1,5 +1,6 @@
+ import { Icon } from "../icons";
+ import { Modal } from "./modal";
+ import { useToast } from "./toast";
++import { DesktopView } from "./desktop-view";
+ 
+-export const pluginReactNativeRuntime = { Icon, Modal, useToast };
++export const pluginReactNativeRuntime = { Icon, Modal, useToast, DesktopView };
+diff --git a/packages/app/src/push-notifications/index.native.ts b/packages/app/src/push-notifications/index.native.ts
+index 579c9a0..ff5a6e3 100644
+--- a/packages/app/src/push-notifications/index.native.ts
++++ b/packages/app/src/push-notifications/index.native.ts
+@@ -1,7 +1,10 @@
+ import { revokeSubscription, startSubscription } from "./internal/subscriptions";
+ import type { RevokePushNotificationsInput, StartPushNotificationsInput } from "./internal/types";
++import Constants from "expo-constants";
+ 
+ export function startPushNotifications(input: StartPushNotificationsInput): () => void {
++  // The unsigned preview has no APNs provider configuration. Signing alone does not supply it.
++  if (Constants.expoConfig?.extra?.aigoNativePreview === true) return () => {};
+   return startSubscription(input);
+ }
+ 
+diff --git a/packages/plugin/src/react-native.ts b/packages/plugin/src/react-native.ts
+index 30f4440..d72e3b2 100644
+--- a/packages/plugin/src/react-native.ts
++++ b/packages/plugin/src/react-native.ts
+@@ -29,8 +29,14 @@ export interface ToastApi {
+   error(message: string): void;
+ }
+ 
++/** Aigo preview: native desktop viewer hosted inside an agent workspace panel. */
++export interface DesktopViewProps {
++  url: string;
++}
++
+ export declare const Icon: ComponentType<PluginIconProps>;
+ export declare const Modal: ModalComponent;
++export declare const DesktopView: ComponentType<DesktopViewProps>;
+ export declare function useToast(): ToastApi;
+ 
+ export type { PluginIconProps } from "./contracts.js";

@@ -1,0 +1,25 @@
+# Proposed public source package
+
+Proposed repository: `YaselMS/aigo-native-preview`. Not created or published yet.
+
+Only the contents of this build-kit directory would be uploaded:
+
+- `patches/native-viewer.patch`: eight changed/new Paseo files implementing the native viewer, navigation checks/tests, preview identity, and preview-only push-registration gate.
+- `aigo-native-desktop/`: plugin implementation, synthetic tests, package/typecheck configuration, and instructions. No installed dependencies.
+- `.github/workflows/ios-preview.yml`: manually triggered macOS build; skips private repositories; no signing or publishing credentials.
+- `scripts/`: identity validator and unsigned physical-device IPA packaging script.
+- `.gitignore`, `README.md`, `REVIEW.md`, `LICENSE`, `NOTICE`.
+
+The workflow downloads the public upstream source at its fixed commit. It does not upload the local checkout, runtime session files, project/chat data, screenshots, pairing records, or signing material. Test URLs and IDs are synthetic. The built application obtains host pairing and viewer access at runtime, not from bundled secrets.
+
+Proposed action after approval: create that public repository, upload this package, and run its manual build on a standard GitHub macOS runner. The workflow retains only the unsigned IPA and build manifest for one day and does not submit anything to Apple or Signulous. Actual iPhone signing/install remains a user step.
+
+First phone acceptance test:
+
+1. Sign and install the IPA through the existing Signulous registration; open Aigo Preview.
+2. Pair the isolated Windows test host and open its existing conversation.
+3. Open Live desktop from that conversation, connect, and confirm live updates inside the app.
+4. Take control and click/type in the disposable fixture. Return control to the agent, then return to the same chat.
+5. Leave the viewer and background the app while holding control. Confirm host ownership expires/releases and reconnect never restores control automatically.
+
+Notifications and final viewer layout are not acceptance criteria for this first build. They remain product work. Windows source checks and an iOS JavaScript bundle are not evidence of a successful native archive or device run.
