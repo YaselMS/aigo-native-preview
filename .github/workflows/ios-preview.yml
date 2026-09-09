@@ -67,7 +67,7 @@ jobs:
       - name: Check viewer navigation and plugin behavior
         run: |
           cd paseo/packages/app
-          npx vitest run src/plugins/react-native/desktop-view-policy.test.ts --bail=1
+          npx vitest run src/plugins/react-native/desktop-view-policy.test.ts src/plugins/react-native/desktop-view.native.test.tsx --bail=1
           cd ../../..
           ln -s ../paseo/node_modules aigo-native-desktop/node_modules
           cd aigo-native-desktop

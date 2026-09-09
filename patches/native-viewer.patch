@@ -1,5 +1,5 @@
 diff --git a/packages/app/app.config.js b/packages/app/app.config.js
-index 1e13997..800ca59 100644
+index 1e13997..c6ad38f 100644
 --- a/packages/app/app.config.js
 +++ b/packages/app/app.config.js
 @@ -9,6 +9,7 @@ const { getNativeReleaseVersion } = require("./native-release-version");
@@ -15,10 +15,11 @@ index 1e13997..800ca59 100644
  };
  
 -const variant = variants[appVariant] ?? variants.production;
+-const nativeReleaseVersion = getNativeReleaseVersion(pkg.version);
 +const variant = isAigoPreview
 +  ? { name: "Aigo Preview", packageId: "dev.aigo.preview" }
 +  : (variants[appVariant] ?? variants.production);
- const nativeReleaseVersion = getNativeReleaseVersion(pkg.version);
++const nativeReleaseVersion = getNativeReleaseVersion(isAigoPreview ? "0.7.3" : pkg.version);
  
  export default {
    expo: {
@@ -26,7 +27,8 @@ index 1e13997..800ca59 100644
 -    slug: "voice-mobile",
 +    slug: isAigoPreview ? "aigo-preview" : "voice-mobile",
      version: nativeReleaseVersion.appVersion,
-     orientation: "portrait",
+-    orientation: "portrait",
++    orientation: isAigoPreview ? "default" : "portrait",
      icon: "./assets/images/icon.png",
 -    scheme: "paseo",
 +    scheme: isAigoPreview ? "aigo-preview" : "paseo",
@@ -42,11 +44,12 @@ index 1e13997..800ca59 100644
        "expo-audio",
        [
          "expo-gradle-jvmargs",
-@@ -186,11 +189,10 @@ export default {
+@@ -186,11 +189,11 @@ export default {
      extra: {
        fdroidBuild: isFdroidBuild,
        profileBuild: isProfileBuild,
 +      aigoNativePreview: isAigoPreview,
++      ...(isAigoPreview ? { aigoPreviewLabel: "Aigo Preview 2" } : {}),
        router: {},
 -      eas: {
 -        projectId: "0e7f65ce-0367-46c8-a238-2b65963d235a",
@@ -59,12 +62,16 @@ index 1e13997..800ca59 100644
  };
 diff --git a/packages/app/src/plugins/react-native/desktop-view-policy.test.ts b/packages/app/src/plugins/react-native/desktop-view-policy.test.ts
 new file mode 100644
-index 0000000..9186b95
+index 0000000..51128e2
 --- /dev/null
 +++ b/packages/app/src/plugins/react-native/desktop-view-policy.test.ts
-@@ -0,0 +1,37 @@
+@@ -0,0 +1,86 @@
 +import { describe, expect, it } from "vitest";
-+import { allowsDesktopNavigation, desktopOrigin } from "./desktop-view-policy";
++import {
++  allowsDesktopNavigation,
++  desktopOrigin,
++  parseDesktopFullscreenRequest,
++} from "./desktop-view-policy";
 +
 +const origin = "https://aigo-native-test.trycloudflare.com";
 +const link = `${origin}/#${"a".repeat(64)}`;
@@ -100,12 +107,59 @@ index 0000000..9186b95
 +    expect(allowsDesktopNavigation(value, origin)).toBe(false);
 +  });
 +});
++
++describe("native desktop fullscreen bridge", () => {
++  it("accepts an explicit presentation request with camera coordinates only", () => {
++    expect(
++      parseDesktopFullscreenRequest(
++        JSON.stringify({
++          type: "aigo:native-fullscreen",
++          fullscreen: true,
++          camera: { zoom: 2, centerX: 960, centerY: 540 },
++          lease: "must-not-cross-the-bridge",
++        }),
++      ),
++    ).toEqual({ fullscreen: true, camera: { zoom: 2, centerX: 960, centerY: 540 } });
++    expect(
++      parseDesktopFullscreenRequest(
++        JSON.stringify({
++          type: "aigo:native-fullscreen",
++          fullscreen: false,
++        }),
++      ),
++    ).toEqual({ fullscreen: false, camera: null });
++  });
++
++  it.each([
++    "not json",
++    "null",
++    "[]",
++    "x".repeat(1025),
++    JSON.stringify({ type: "take-control", fullscreen: true }),
++    JSON.stringify({ type: "aigo:native-fullscreen", fullscreen: "true" }),
++    JSON.stringify({ type: "aigo:native-fullscreen", fullscreen: true, camera: {} }),
++    JSON.stringify({
++      type: "aigo:native-fullscreen",
++      fullscreen: true,
++      camera: { zoom: -1, centerX: 0, centerY: 0 },
++    }),
++    JSON.stringify({
++      type: "aigo:native-fullscreen",
++      fullscreen: true,
++      camera: { zoom: 2, centerX: 100001, centerY: 0 },
++    }),
++  ])("ignores malformed and unrelated messages: %s", (data) => {
++    expect(parseDesktopFullscreenRequest(data)).toBeNull();
++  });
++});
 diff --git a/packages/app/src/plugins/react-native/desktop-view-policy.ts b/packages/app/src/plugins/react-native/desktop-view-policy.ts
 new file mode 100644
-index 0000000..1f5a3cd
+index 0000000..ebab5dd
 --- /dev/null
 +++ b/packages/app/src/plugins/react-native/desktop-view-policy.ts
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,57 @@
++import { z } from "zod";
++
 +export function desktopOrigin(value: string): string | null {
 +  let url: URL;
 +  try {
@@ -133,20 +187,232 @@ index 0000000..1f5a3cd
 +    return false;
 +  }
 +}
++
++const desktopFullscreenSchema = z.object({
++  type: z.literal("aigo:native-fullscreen"),
++  fullscreen: z.boolean(),
++  camera: z
++    .object({
++      zoom: z.number().finite().min(1).max(32),
++      centerX: z.number().finite().min(0).max(100000),
++      centerY: z.number().finite().min(0).max(100000),
++    })
++    .nullable()
++    .default(null),
++});
++
++export type DesktopFullscreenRequest = Omit<z.infer<typeof desktopFullscreenSchema>, "type">;
++
++export function parseDesktopFullscreenRequest(data: string): DesktopFullscreenRequest | null {
++  if (data.length > 1024) return null;
++  let value: unknown;
++  try {
++    value = JSON.parse(data);
++  } catch {
++    return null;
++  }
++  const result = desktopFullscreenSchema.safeParse(value);
++  if (!result.success) return null;
++  return { fullscreen: result.data.fullscreen, camera: result.data.camera };
++}
+diff --git a/packages/app/src/plugins/react-native/desktop-view.native.test.tsx b/packages/app/src/plugins/react-native/desktop-view.native.test.tsx
+new file mode 100644
+index 0000000..a6e48c3
+--- /dev/null
++++ b/packages/app/src/plugins/react-native/desktop-view.native.test.tsx
+@@ -0,0 +1,171 @@
++/** @vitest-environment jsdom */
++import React, { act, type ReactNode } from "react";
++import { createRoot, type Root } from "react-dom/client";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++
++const state = vi.hoisted(() => ({
++  active: true,
++  focused: true,
++  mounts: 0,
++  unmounts: 0,
++  appChange: (_value: string) => {},
++  message: (_event: { nativeEvent: { url: string; data: string } }) => {},
++  fail: () => {},
++  script: "",
++}));
++
++vi.mock("react-native", () => ({
++  AppState: {
++    currentState: "active",
++    addEventListener: (_event: string, callback: typeof state.appChange) => {
++      state.appChange = callback;
++      return { remove: vi.fn() };
++    },
++  },
++  View: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
++  Text: ({ children }: { children?: ReactNode }) => <span>{children}</span>,
++  ActivityIndicator: () => <span>Connecting</span>,
++  StatusBar: () => null,
++  Modal: ({ children }: { children?: ReactNode }) => <div data-fullscreen>{children}</div>,
++}));
++vi.mock("react-native-safe-area-context", () => ({
++  SafeAreaProvider: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
++  SafeAreaView: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
++}));
++vi.mock("react-native-unistyles", () => ({ StyleSheet: { create: () => ({}) } }));
++vi.mock("@/components/ui/button", () => ({
++  Button: ({ children, onPress }: { children?: ReactNode; onPress: () => void }) => (
++    <button type="button" onClick={onPress}>
++      {children}
++    </button>
++  ),
++}));
++vi.mock("@/panels/pane-context", () => ({
++  usePaneFocus: () => ({ isInteractive: state.focused }),
++}));
++vi.mock("@/components/retained-panel", () => ({ useRetainedPanelActive: () => state.active }));
++vi.mock("react-native-webview", () => ({
++  WebView: (props: {
++    onMessage: typeof state.message;
++    onError: typeof state.fail;
++    injectedJavaScript: string;
++  }) => {
++    state.message = props.onMessage;
++    state.fail = props.onError;
++    state.script = props.injectedJavaScript;
++    React.useEffect(() => {
++      state.mounts += 1;
++      return () => {
++        state.unmounts += 1;
++      };
++    }, []);
++    return <div data-webview />;
++  },
++}));
++
++import { DesktopView } from "./desktop-view.native";
++
++const origin = "https://aigo-native-test.trycloudflare.com";
++const url = `${origin}/#${"a".repeat(64)}`;
++
++describe("native desktop presentation lifecycle", () => {
++  let container: HTMLDivElement;
++  let root: Root;
++  function render() {
++    act(() => root.render(<DesktopView url={url} />));
++  }
++  function enter() {
++    act(() =>
++      state.message({
++        nativeEvent: {
++          url,
++          data: JSON.stringify({
++            type: "aigo:native-fullscreen",
++            fullscreen: true,
++            camera: { zoom: 2, centerX: 960, centerY: 540 },
++          }),
++        },
++      }),
++    );
++  }
++  beforeEach(() => {
++    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
++    state.active = true;
++    state.focused = true;
++    state.mounts = 0;
++    state.unmounts = 0;
++    container = document.createElement("div");
++    root = createRoot(container);
++  });
++  afterEach(() => {
++    act(() => root.unmount());
++    vi.unstubAllGlobals();
++  });
++
++  it("releases the embedded instance before showing fullscreen and preserves camera only", () => {
++    render();
++    enter();
++    expect(container.querySelector("[data-fullscreen]")).not.toBeNull();
++    expect(container.querySelectorAll("[data-webview]")).toHaveLength(1);
++    expect(state.mounts).toBe(2);
++    expect(state.unmounts).toBe(1);
++    expect(state.script).toContain('"zoom":2,"centerX":960,"centerY":540');
++    expect(state.script).toContain("window.__AIGO_NATIVE_FULLSCREEN__ = true");
++  });
++
++  it.each(["background", "panel", "focus"])(
++    "destroys fullscreen when losing %s activity",
++    (reason) => {
++      render();
++      enter();
++      if (reason === "background") act(() => state.appChange("background"));
++      if (reason === "panel") {
++        state.active = false;
++        render();
++      }
++      if (reason === "focus") {
++        state.focused = false;
++        render();
++      }
++      expect(container.querySelector("[data-fullscreen]")).toBeNull();
++      expect(container.querySelector("[data-webview]")).toBeNull();
++      expect(state.unmounts).toBe(2);
++      expect(container.textContent).toContain("disconnected");
++      state.active = true;
++      state.focused = true;
++      act(() => state.appChange("active"));
++      render();
++      expect(container.querySelector("[data-fullscreen]")).toBeNull();
++      expect(state.script).toContain("window.__AIGO_NATIVE_FULLSCREEN__ = false");
++    },
++  );
++
++  it("keeps a native exit available when the fullscreen page fails", () => {
++    render();
++    enter();
++    act(() => state.fail());
++    expect(container.textContent).toContain("connection failed");
++    const done = container.querySelector("button");
++    expect(done?.textContent).toBe("Done");
++    act(() => done?.click());
++    expect(container.querySelector("[data-fullscreen]")).toBeNull();
++    expect(container.querySelectorAll("[data-webview]")).toHaveLength(1);
++  });
++
++  it("ignores presentation requests from other origins", () => {
++    render();
++    act(() =>
++      state.message({
++        nativeEvent: {
++          url: "https://example.com/",
++          data: JSON.stringify({
++            type: "aigo:native-fullscreen",
++            fullscreen: true,
++          }),
++        },
++      }),
++    );
++    expect(container.querySelector("[data-fullscreen]")).toBeNull();
++    expect(state.mounts).toBe(1);
++  });
++});
 diff --git a/packages/app/src/plugins/react-native/desktop-view.native.tsx b/packages/app/src/plugins/react-native/desktop-view.native.tsx
 new file mode 100644
-index 0000000..1013c74
+index 0000000..2c9faf5
 --- /dev/null
 +++ b/packages/app/src/plugins/react-native/desktop-view.native.tsx
-@@ -0,0 +1,112 @@
-+import { useCallback, useEffect, useMemo, useState } from "react";
-+import { ActivityIndicator, AppState, Pressable, Text, View } from "react-native";
+@@ -0,0 +1,190 @@
++import React, { useCallback, useEffect, useMemo, useState } from "react";
++import { ActivityIndicator, AppState, Modal, StatusBar, Text, View } from "react-native";
++import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 +import { StyleSheet } from "react-native-unistyles";
-+import { WebView, type WebViewNavigation } from "react-native-webview";
++import { WebView, type WebViewMessageEvent, type WebViewNavigation } from "react-native-webview";
 +import type { DesktopViewProps } from "@getpaseo/plugin/react-native";
 +import { usePaneFocus } from "@/panels/pane-context";
 +import { useRetainedPanelActive } from "@/components/retained-panel";
-+import { allowsDesktopNavigation, desktopOrigin } from "./desktop-view-policy";
++import { Button } from "@/components/ui/button";
++import {
++  allowsDesktopNavigation,
++  desktopOrigin,
++  parseDesktopFullscreenRequest,
++  type DesktopFullscreenRequest,
++} from "./desktop-view-policy";
 +
 +export function DesktopView({ url }: DesktopViewProps) {
 +  const { isInteractive } = usePaneFocus();
@@ -169,9 +435,68 @@ index 0000000..1013c74
 +}
 +
 +function ConnectedDesktop({ url, origin }: DesktopViewProps & { origin: string }) {
++  const [presentation, setPresentation] = useState<DesktopFullscreenRequest>({
++    fullscreen: false,
++    camera: null,
++  });
++  const onMessage = useCallback(
++    (event: WebViewMessageEvent) => {
++      if (!allowsDesktopNavigation(event.nativeEvent.url, origin)) return;
++      const request = parseDesktopFullscreenRequest(event.nativeEvent.data);
++      if (request) setPresentation(request);
++    },
++    [origin],
++  );
++  const exitFullscreen = useCallback(() => {
++    setPresentation({ fullscreen: false, camera: null });
++  }, []);
++  const viewer = (
++    <DesktopWebView url={url} origin={origin} presentation={presentation} onMessage={onMessage} />
++  );
++  if (!presentation.fullscreen) return viewer;
++  // Moving into a native Modal recreates WKWebView. Keep only camera state, never the
++  // control lease: closing the old socket releases held input and requires a new takeover.
++  return (
++    <Modal
++      visible
++      animationType="none"
++      presentationStyle="fullScreen"
++      supportedOrientations={["portrait", "landscape-left", "landscape-right"]}
++      statusBarTranslucent
++      navigationBarTranslucent
++      onRequestClose={exitFullscreen}
++    >
++      <SafeAreaProvider>
++        <SafeAreaView style={styles.container}>
++          <StatusBar hidden />
++          <View style={styles.toolbar}>
++            <Text style={styles.title}>Desktop</Text>
++            <Button variant="ghost" size="sm" onPress={exitFullscreen}>
++              Done
++            </Button>
++          </View>
++          {viewer}
++        </SafeAreaView>
++      </SafeAreaProvider>
++    </Modal>
++  );
++}
++
++interface DesktopWebViewProps extends DesktopViewProps {
++  origin: string;
++  presentation: DesktopFullscreenRequest;
++  onMessage: (event: WebViewMessageEvent) => void;
++}
++
++function DesktopWebView({ url, origin, presentation, onMessage }: DesktopWebViewProps) {
 +  const [failed, setFailed] = useState(false);
 +  const [loading, setLoading] = useState(true);
 +  const source = useMemo(() => ({ uri: url }), [url]);
++  const nativeState = `window.__AIGO_NATIVE_FULLSCREEN__ = ${JSON.stringify(presentation.fullscreen)};
++    window.__AIGO_NATIVE_CAMERA__ = ${JSON.stringify(presentation.camera)};
++    window.dispatchEvent(new CustomEvent('aigo:native-fullscreenchange', {
++      detail: { fullscreen: window.__AIGO_NATIVE_FULLSCREEN__ }
++    })); true;`;
 +  const retry = useCallback(() => {
 +    setLoading(true);
 +    setFailed(false);
@@ -188,9 +513,7 @@ index 0000000..1013c74
 +        <Text style={styles.text}>
 +          Desktop connection failed. Check that the PC viewer is running.
 +        </Text>
-+        <Pressable accessibilityRole="button" onPress={retry} style={styles.button}>
-+          <Text style={styles.text}>Retry connection</Text>
-+        </Pressable>
++        <Button onPress={retry}>Retry connection</Button>
 +      </View>
 +    );
 +  }
@@ -198,6 +521,11 @@ index 0000000..1013c74
 +    <View style={styles.container}>
 +      <WebView
 +        source={source}
++        onMessage={onMessage}
++        injectedJavaScriptBeforeContentLoaded={nativeState}
++        injectedJavaScript={nativeState}
++        injectedJavaScriptBeforeContentLoadedForMainFrameOnly
++        injectedJavaScriptForMainFrameOnly
 +        style={styles.container}
 +        containerStyle={styles.container}
 +        incognito
@@ -215,6 +543,7 @@ index 0000000..1013c74
 +        allowUniversalAccessFromFileURLs={false}
 +        mixedContentMode="never"
 +        bounces={false}
++        scrollEnabled={false}
 +        automaticallyAdjustContentInsets={false}
 +        contentInsetAdjustmentBehavior="never"
 +        onLoadEnd={loaded}
@@ -247,8 +576,16 @@ index 0000000..1013c74
 +    justifyContent: "center",
 +    backgroundColor: theme.colors.surface0,
 +  },
-+  text: { color: theme.colors.foreground },
-+  button: { padding: 12, borderRadius: 8, backgroundColor: theme.colors.surface1 },
++  text: { color: theme.colors.foreground, fontSize: theme.fontSize.base },
++  toolbar: {
++    flexDirection: "row",
++    alignItems: "center",
++    justifyContent: "space-between",
++    paddingHorizontal: theme.spacing[2],
++    borderBottomWidth: 1,
++    borderBottomColor: theme.colors.border,
++  },
++  title: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
 +  loading: { position: "absolute", top: 16, alignSelf: "center" },
 +}));
 diff --git a/packages/app/src/plugins/react-native/desktop-view.tsx b/packages/app/src/plugins/react-native/desktop-view.tsx
@@ -300,6 +637,41 @@ index 579c9a0..ff5a6e3 100644
    return startSubscription(input);
  }
  
+diff --git a/packages/app/src/screens/settings-screen.tsx b/packages/app/src/screens/settings-screen.tsx
+index 5e5e9be..638c3df 100644
+--- a/packages/app/src/screens/settings-screen.tsx
++++ b/packages/app/src/screens/settings-screen.tsx
+@@ -91,6 +91,7 @@ import { isElectronRuntime } from "@/desktop/host";
+ import { useDesktopAppUpdater } from "@/desktop/updates/use-desktop-app-updater";
+ import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
+ import { resolveAppVersion } from "@/utils/app-version";
++import Constants from "expo-constants";
+ import { useAppDiagnosticStore } from "@/diagnostics/store";
+ import { settingsStyles } from "@/styles/settings";
+ import { THINKING_TONE_NATIVE_PCM_BASE64 } from "@/utils/thinking-tone.native-pcm";
+@@ -615,6 +616,13 @@ function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSection
+   );
+ }
+ 
++function appVersionDisplayText(appVersion: string | null): string {
++  if (Constants.expoConfig?.extra?.aigoNativePreview === true) {
++    return `v${Constants.expoConfig.version} · ${Constants.expoConfig.extra.aigoPreviewLabel}`;
++  }
++  return formatVersionWithPrefix(appVersion);
++}
++
+ function normalizeVersion(version: string | null | undefined): string | null {
+   const trimmed = version?.trim();
+   if (!trimmed) return null;
+@@ -1195,7 +1203,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
+   const lastOpenedAddHostIntentRef = useRef<string | null>(null);
+   const isDesktopApp = isElectronRuntime();
+   const appVersion = resolveAppVersion();
+-  const appVersionText = formatVersionWithPrefix(appVersion);
++  const appVersionText = appVersionDisplayText(appVersion);
+   const isCompactLayout = useIsCompactFormFactor();
+   const insets = useSafeAreaInsets();
+   const insetBottomStyle = useMemo(() => ({ paddingBottom: insets.bottom }), [insets.bottom]);
 diff --git a/packages/plugin/src/react-native.ts b/packages/plugin/src/react-native.ts
 index 30f4440..d72e3b2 100644
 --- a/packages/plugin/src/react-native.ts

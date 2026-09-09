@@ -80,6 +80,10 @@ run("xcodebuild", [
 const application = exactlyOne(join(archive, "Products", "Applications"), ".app");
 const info = plist(join(application, "Info.plist"));
 assert.equal(info.CFBundleIdentifier, "dev.aigo.preview");
+assert.equal(info.CFBundleShortVersionString, "0.7.3");
+assert.equal(info.CFBundleVersion, "7003999");
+assert.ok(info.UISupportedInterfaceOrientations?.includes("UIInterfaceOrientationLandscapeLeft"));
+assert.ok(info.UISupportedInterfaceOrientations?.includes("UIInterfaceOrientationLandscapeRight"));
 assert.ok(info.CFBundleSupportedPlatforms?.includes("iPhoneOS"), "Expected a physical-device app.");
 assert.ok(existsSync(join(application, "main.jsbundle")), "Release JavaScript bundle is missing.");
 assert.ok(!existsSync(join(application, "embedded.mobileprovision")), "Unexpected provisioning credentials in unsigned app.");
@@ -92,6 +96,7 @@ const ipa = join(output, "Aigo-Preview-unsigned.ipa");
 run("ditto", ["-c", "-k", "--keepParent", "Payload", basename(ipa)], output);
 writeFileSync(join(output, "build-manifest.json"), `${JSON.stringify({
   app: "Aigo Preview",
+  preview: 2,
   bundleIdentifier: info.CFBundleIdentifier,
   upstreamCommit: upstream,
   buildKitCommit: process.env.GITHUB_SHA ?? null,
