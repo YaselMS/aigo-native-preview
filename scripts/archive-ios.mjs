@@ -42,6 +42,12 @@ function checkEntitlements(directory) {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) checkEntitlements(path);
     else if (entry.name.endsWith(".entitlements")) {
+      // Expo auto-applies the installed notifications package during prebuild.
+      // Only this unsigned preview omits remote push and its provider configuration.
+      if (plist(path)["aps-environment"] !== undefined) {
+        run("plutil", ["-remove", "aps-environment", path]);
+        console.log("Removed Expo's automatic APNs entitlement from the generated preview project.");
+      }
       assert.equal(plist(path)["aps-environment"], undefined, `Unexpected APNs entitlement: ${path}`);
     }
   }
@@ -100,3 +106,4 @@ writeFileSync(join(output, "build-manifest.json"), `${JSON.stringify({
   xcode: run("xcodebuild", ["-version"], appDirectory, true),
 }, null, 2)}\n`);
 console.log("Unsigned physical-device IPA packaged. Signing and iPhone execution remain unverified.");
+
