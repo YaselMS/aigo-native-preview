@@ -1,0 +1,94 @@
+name: Build unsigned upstream Paseo notification control
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paseo-ios-notification-control
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.event.repository.private == false
+    # Standard public-repository runner. Do not change to a billed larger runner.
+    runs-on: macos-15
+    timeout-minutes: 75
+    env:
+      CI: "1"
+      APP_VARIANT: production
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      ONNXRUNTIME_NODE_INSTALL: skip
+      LEFTHOOK: "0"
+    steps:
+      - name: Check out this build kit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Check out pinned unmodified Paseo source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: getpaseo/paseo
+          ref: 9400a49af670fdb5db4af58e73f8df98588dbea9
+          path: paseo
+          persist-credentials: false
+
+      - name: Use the upstream Node version
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.20.0
+
+      - name: Verify the pinned source starts clean
+        working-directory: paseo
+        run: |
+          test "$(git rev-parse HEAD)" = 9400a49af670fdb5db4af58e73f8df98588dbea9
+          git diff --exit-code
+          git diff --cached --exit-code
+
+      - name: Install pinned dependencies
+        working-directory: paseo
+        # Upstream postinstall patches dependencies in node_modules; it must not edit tracked source.
+        run: npm ci
+
+      - name: Build app dependencies and terminal assets
+        working-directory: paseo
+        run: |
+          npm run build:app-deps
+          npm run build:terminal-webview --workspace=@getpaseo/app
+
+      - name: Check upstream client types and lint
+        working-directory: paseo
+        run: |
+          npm run typecheck --workspace=@getpaseo/app --workspace=@getpaseo/plugin
+          npm run lint
+
+      - name: Verify the production control and unchanged tracked source
+        working-directory: paseo/packages/app
+        run: |
+          git diff --exit-code
+          git diff --cached --exit-code
+          npx expo config --type prebuild --json > "$RUNNER_TEMP/paseo-control-expo-config.json"
+          node ../../../scripts/verify-paseo-control-config.mjs "$RUNNER_TEMP/paseo-control-expo-config.json"
+          git diff --exit-code
+          git diff --cached --exit-code
+
+      - name: Generate the upstream iOS project and install CocoaPods
+        working-directory: paseo/packages/app
+        run: npx expo prebuild --platform ios --non-interactive
+
+      - name: Archive an unsigned device build and package the control IPA
+        run: node scripts/archive-paseo-control.mjs paseo "$RUNNER_TEMP/paseo-control-ios"
+
+      - name: Save only the control IPA and build manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: paseo-control-unsigned-iphone
+          path: |
+            ${{ runner.temp }}/paseo-control-ios/Paseo-Control-unsigned.ipa
+            ${{ runner.temp }}/paseo-control-ios/build-manifest.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0

@@ -1,0 +1,78 @@
+name: Publish verified upstream Paseo notification control
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run:
+        description: Reviewed successful control build run ID
+        required: true
+      build_commit:
+        description: Exact build-kit commit from the reviewed manifest
+        required: true
+      sha256:
+        description: Independently verified control IPA SHA-256
+        required: true
+
+permissions: {}
+concurrency:
+  group: publish-paseo-control
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN: ${{ inputs.build_run }}
+      BUILD_COMMIT: ${{ inputs.build_commit }}
+      IPA_SHA256: ${{ inputs.sha256 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Validate reviewed identifiers
+        shell: python
+        run: |
+          import os, re
+          assert re.fullmatch(r'[0-9]+', os.environ['BUILD_RUN'])
+          assert re.fullmatch(r'[0-9a-f]{40}', os.environ['BUILD_COMMIT'])
+          assert re.fullmatch(r'[0-9a-f]{64}', os.environ['IPA_SHA256'])
+
+      - name: Download the reviewed control build
+        run: |
+          gh run view "$BUILD_RUN" --json conclusion,headSha > run.json
+          gh run download "$BUILD_RUN" --name paseo-control-unsigned-iphone --dir artifact
+
+      - name: Verify artifact and source identity
+        shell: python
+        run: |
+          import hashlib, json, os, pathlib
+          run = json.loads(pathlib.Path('run.json').read_text())
+          assert run['conclusion'] == 'success'
+          assert run['headSha'] == os.environ['BUILD_COMMIT']
+          root = pathlib.Path('artifact')
+          manifest = json.loads((root / 'build-manifest.json').read_text())
+          assert manifest['app'] == 'Paseo'
+          assert manifest['controlPurpose'] == 'temporary upstream notification control'
+          assert manifest['buildKitCommit'] == os.environ['BUILD_COMMIT']
+          assert manifest['bundleIdentifier'] == 'sh.paseo'
+          assert manifest['upstreamCommit'] == '9400a49af670fdb5db4af58e73f8df98588dbea9'
+          assert manifest['version'] == '0.7.2' and manifest['buildNumber'] == '7002999'
+          assert manifest['signed'] is False
+          assert manifest['remotePushConfigured'] is True
+          assert manifest['deliveryUnverified'] is True
+          assert manifest['expoProjectId'] == '0e7f65ce-0367-46c8-a238-2b65963d235a'
+          assert manifest['requestedApnsEnvironment'] == 'development'
+          assert manifest['sha256'] == os.environ['IPA_SHA256']
+          assert hashlib.sha256((root / 'Paseo-Control-unsigned.ipa').read_bytes()).hexdigest() == os.environ['IPA_SHA256']
+
+      - name: Publish the unsigned temporary control
+        run: |
+          gh release create v0.1.0-paseo-control.1 artifact/Paseo-Control-unsigned.ipa artifact/build-manifest.json --target "$BUILD_COMMIT" --title 'Paseo notification control — unsigned upstream build' --notes-file PASEO-CONTROL.md --prerelease
