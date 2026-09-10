@@ -1,3 +1,14 @@
+diff --git a/package-lock.json b/package-lock.json
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -36337,6 +36337,7 @@
+         "@xterm/xterm": "^6.1.0-beta.213",
+         "buffer": "^6.0.3",
+         "expo": "^54.0.18",
++        "expo-application": "~7.0.8",
+         "expo-asset": "~12.0.12",
+         "expo-audio": "~1.0.13",
+         "expo-build-properties": "^1.0.9",
 diff --git a/packages/app/app.config.js b/packages/app/app.config.js
 --- a/packages/app/app.config.js
 +++ b/packages/app/app.config.js
@@ -18,7 +29,7 @@ diff --git a/packages/app/app.config.js b/packages/app/app.config.js
 +const variant = isAigoPreview
 +  ? { name: "Aigo Preview", packageId: "dev.aigo.preview" }
 +  : (variants[appVariant] ?? variants.production);
-+const nativeReleaseVersion = getNativeReleaseVersion(isAigoPreview ? "0.7.4" : pkg.version);
++const nativeReleaseVersion = getNativeReleaseVersion(isAigoPreview ? "0.7.5" : pkg.version);
  
  export default {
    expo: {
@@ -34,31 +45,749 @@ diff --git a/packages/app/app.config.js b/packages/app/app.config.js
      userInterfaceStyle: "automatic",
      newArchEnabled: true,
      ios: {
-@@ -155,7 +158,7 @@
+@@ -155,7 +158,9 @@
            },
          },
        ],
 -      ...buildProfile.notificationPlugins,
-+      ...(isAigoPreview ? [] : buildProfile.notificationPlugins),
++      ...(isAigoPreview
++        ? [["expo-notifications", { mode: "production" }]]
++        : buildProfile.notificationPlugins),
        "expo-audio",
        [
          "expo-gradle-jvmargs",
-@@ -186,11 +189,11 @@
+@@ -186,11 +191,13 @@
      extra: {
        fdroidBuild: isFdroidBuild,
        profileBuild: isProfileBuild,
 +      aigoNativePreview: isAigoPreview,
-+      ...(isAigoPreview ? { aigoPreviewLabel: "Aigo Preview 3" } : {}),
++      ...(isAigoPreview
++        ? { aigoPreviewLabel: "Aigo Preview 4", aigoNotificationDiagnostics: true }
++        : {}),
        router: {},
 -      eas: {
 -        projectId: "0e7f65ce-0367-46c8-a238-2b65963d235a",
 -      },
-+      ...(isAigoPreview ? {} : { eas: { projectId: "0e7f65ce-0367-46c8-a238-2b65963d235a" } }),
-     },
+-    },
 -    owner: "getpaseo",
++      ...(isAigoPreview ? {} : { eas: { projectId: "0e7f65ce-0367-46c8-a238-2b65963d235a" } }),
++    },
 +    ...(isAigoPreview ? {} : { owner: "getpaseo" }),
    },
  };
+diff --git a/packages/app/package.json b/packages/app/package.json
+--- a/packages/app/package.json
++++ b/packages/app/package.json
+@@ -76,6 +76,7 @@
+     "@xterm/xterm": "^6.1.0-beta.213",
+     "buffer": "^6.0.3",
+     "expo": "^54.0.18",
++    "expo-application": "~7.0.8",
+     "expo-asset": "~12.0.12",
+     "expo-audio": "~1.0.13",
+     "expo-build-properties": "^1.0.9",
+diff --git a/packages/app/src/agent-stream/permission-response-feedback.test.tsx b/packages/app/src/agent-stream/permission-response-feedback.test.tsx
+new file mode 100644
+--- /dev/null
++++ b/packages/app/src/agent-stream/permission-response-feedback.test.tsx
+@@ -0,0 +1,107 @@
++/** @vitest-environment jsdom */
++import React from "react";
++import { cleanup, fireEvent, render, screen } from "@testing-library/react";
++import { createInstance } from "i18next";
++import { I18nextProvider, initReactI18next } from "react-i18next";
++import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
++import { en } from "@/i18n/resources/en";
++import { PermissionResponseFeedback } from "./permission-response-feedback";
++import { QuestionFormCard } from "@/components/question-form-card";
++import type { PendingPermission } from "@/types/shared";
++
++const permission: PendingPermission = {
++  key: "agent:question",
++  agentId: "agent",
++  request: {
++    id: "question",
++    provider: "opencode",
++    name: "Question",
++    kind: "question",
++    input: {
++      questions: [{ header: "Choice", question: "Choose a value", options: [{ label: "Final" }] }],
++    },
++  },
++};
++
++const i18n = createInstance();
++const ignoreCheck = () => undefined;
++beforeAll(async () => {
++  await i18n.use(initReactI18next).init({ lng: "en", resources: { en: { translation: en } } });
++});
++afterEach(cleanup);
++
++describe("permission response feedback", () => {
++  it("keeps a completed question selection visible but blocks another submission when uncertain", () => {
++    const respond = vi.fn();
++    const card = (blocked: boolean) => (
++      <I18nextProvider i18n={i18n}>
++        <QuestionFormCard
++          permission={permission}
++          onRespond={respond}
++          isResponding={false}
++          isResponseBlocked={blocked}
++        />
++      </I18nextProvider>
++    );
++    const { rerender } = render(card(false));
++    fireEvent.click(screen.getByRole("radio", { name: "Final" }));
++    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
++    expect(respond).toHaveBeenCalledTimes(1);
++    rerender(card(true));
++    expect(screen.getByRole("radio", { name: "Final" }).getAttribute("aria-checked")).toBe("true");
++    expect(screen.getByRole("button", { name: "Submit" }).getAttribute("aria-disabled")).toBe(
++      "true",
++    );
++    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
++    expect(respond).toHaveBeenCalledTimes(1);
++  });
++
++  it("keeps uncertainty visible and offers a status check without an approval action", () => {
++    const checkStatus = vi.fn();
++    render(
++      <I18nextProvider i18n={i18n}>
++        <PermissionResponseFeedback status="uncertain" onCheckStatus={checkStatus} />
++      </I18nextProvider>,
++    );
++    expect(screen.getByRole("alert").textContent).toBe(
++      en.agentStream.permission.response.uncertain,
++    );
++    fireEvent.click(screen.getByRole("button", { name: "Check status" }));
++    expect(checkStatus).toHaveBeenCalledTimes(1);
++    expect(screen.getAllByRole("button")).toHaveLength(1);
++    expect(screen.getByRole("alert").textContent).toBe(
++      en.agentStream.permission.response.uncertain,
++    );
++  });
++
++  it("shows offline recovery, then progress and a neutral no-longer-pending result", () => {
++    const feedback = (status: "unavailable" | "pending" | "complete") => (
++      <I18nextProvider i18n={i18n}>
++        <PermissionResponseFeedback status={status} onCheckStatus={ignoreCheck} />
++      </I18nextProvider>
++    );
++    const { rerender } = render(feedback("unavailable"));
++    expect(screen.getByRole("alert").textContent).toBe(
++      en.agentStream.permission.response.unavailable,
++    );
++    expect(screen.getByRole("button", { name: "Check status" }).textContent).toBe("Check status");
++    rerender(feedback("pending"));
++    expect(screen.getByRole("alert").textContent).toBe(en.agentStream.permission.response.pending);
++    expect(screen.queryByRole("button")).toBeNull();
++    rerender(feedback("complete"));
++    expect(screen.getByRole("alert").textContent).toBe("This request is no longer pending.");
++    expect(screen.queryByRole("button")).toBeNull();
++  });
++
++  it("explains that a stale request was not sent", () => {
++    render(
++      <I18nextProvider i18n={i18n}>
++        <PermissionResponseFeedback status="stale" onCheckStatus={ignoreCheck} />
++      </I18nextProvider>,
++    );
++    expect(screen.getByRole("alert").textContent).toBe(
++      "This request is no longer pending. No response was sent.",
++    );
++    expect(screen.queryByRole("button")).toBeNull();
++  });
++});
+diff --git a/packages/app/src/agent-stream/permission-response-feedback.tsx b/packages/app/src/agent-stream/permission-response-feedback.tsx
+new file mode 100644
+--- /dev/null
++++ b/packages/app/src/agent-stream/permission-response-feedback.tsx
+@@ -0,0 +1,41 @@
++import React from "react";
++import { Text, View } from "react-native";
++import { Button } from "@/components/ui/button";
++import { useTranslation } from "react-i18next";
++import { StyleSheet } from "react-native-unistyles";
++import type { PermissionResponseOutcome } from "./permission-response";
++
++export function PermissionResponseFeedback({
++  status,
++  onCheckStatus,
++}: {
++  status: PermissionResponseOutcome | "pending";
++  onCheckStatus: () => void;
++}) {
++  const { t } = useTranslation();
++  if (status === "ready") return null;
++  return (
++    <View style={styles.container} testID="permission-response-feedback">
++      <Text accessibilityRole="alert" style={styles.message}>
++        {t(`agentStream.permission.response.${status}`)}
++      </Text>
++      {status === "uncertain" || status === "unavailable" ? (
++        <Button
++          variant="outline"
++          size="sm"
++          onPress={onCheckStatus}
++          style={styles.button}
++          testID="permission-response-check"
++        >
++          {t("agentStream.permission.response.check")}
++        </Button>
++      ) : null}
++    </View>
++  );
++}
++
++const styles = StyleSheet.create((theme) => ({
++  container: { gap: theme.spacing[2] },
++  message: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.base },
++  button: { alignSelf: "flex-start" },
++}));
+diff --git a/packages/app/src/agent-stream/permission-response.test.ts b/packages/app/src/agent-stream/permission-response.test.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/app/src/agent-stream/permission-response.test.ts
+@@ -0,0 +1,168 @@
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { reconcilePermissionResponse, type PermissionResponseClient } from "./permission-response";
++
++function fixture(serverId: string) {
++  let pending = true;
++  let connected = true;
++  let failedRead = false;
++  let missingAgent = false;
++  const sent: unknown[] = [];
++  const client: PermissionResponseClient = {
++    get isConnected() {
++      return connected;
++    },
++    async fetchAgent() {
++      if (failedRead) throw new Error("Read failed");
++      if (missingAgent) return null;
++      return { agent: { pendingPermissions: pending ? [{ id: "request" }] : [] } } as NonNullable<
++        Awaited<ReturnType<PermissionResponseClient["fetchAgent"]>>
++      >;
++    },
++    async respondToPermissionAndWait(...args) {
++      sent.push(args);
++      throw new Error("Missing acknowledgement");
++    },
++  };
++  const input = { serverId, agentId: "agent", requestId: "request", client, timeoutMs: 500 };
++  return {
++    client,
++    input,
++    sent,
++    setPending(value: boolean) {
++      pending = value;
++    },
++    disconnect() {
++      connected = false;
++    },
++    failReads() {
++      failedRead = true;
++    },
++    removeAgent() {
++      missingAgent = true;
++    },
++  };
++}
++afterEach(() => vi.useRealTimers());
++
++describe("permission response reconciliation", () => {
++  it("does not coalesce identical agent/request ids across concurrent host operations", async () => {
++    vi.useFakeTimers();
++    const origin = fixture("concurrent-origin");
++    const destination = fixture("concurrent-destination");
++    const first = reconcilePermissionResponse({ ...origin.input, response: { behavior: "deny" } });
++    const second = reconcilePermissionResponse({
++      ...destination.input,
++      response: { behavior: "allow" },
++    });
++    expect(second).not.toBe(first);
++    await vi.advanceTimersByTimeAsync(500);
++    expect(await first).toBe("uncertain");
++    expect(await second).toBe("uncertain");
++    expect(origin.sent).toEqual([["agent", "request", { behavior: "deny" }, 500]]);
++    expect(destination.sent).toEqual([["agent", "request", { behavior: "allow" }, 500]]);
++    origin.setPending(false);
++    expect(await reconcilePermissionResponse(origin.input)).toBe("complete");
++    expect(await reconcilePermissionResponse(destination.input)).toBe("uncertain");
++  });
++
++  it("sends once and observes removal even without a resolution acknowledgement", async () => {
++    const f = fixture("missing-ack");
++    f.client.respondToPermissionAndWait = async (...args) => {
++      f.sent.push(args);
++      f.setPending(false);
++      throw new Error("No acknowledgement");
++    };
++    expect(await reconcilePermissionResponse({ ...f.input, response: { behavior: "allow" } })).toBe(
++      "complete",
++    );
++    expect(f.sent).toEqual([["agent", "request", { behavior: "allow" }, 500]]);
++  });
++
++  it("does not send an answer to an already resolved or missing request", async () => {
++    const f = fixture("stale");
++    f.setPending(false);
++    expect(await reconcilePermissionResponse({ ...f.input, response: { behavior: "allow" } })).toBe(
++      "stale",
++    );
++    f.removeAgent();
++    expect(await reconcilePermissionResponse({ ...f.input, response: { behavior: "allow" } })).toBe(
++      "stale",
++    );
++    expect(f.sent).toEqual([]);
++  });
++
++  it("does not infer resolution or send when preflight is offline or fails", async () => {
++    const offline = fixture("offline");
++    offline.disconnect();
++    expect(
++      await reconcilePermissionResponse({ ...offline.input, response: { behavior: "allow" } }),
++    ).toBe("unavailable");
++    expect(offline.sent).toEqual([]);
++    const failed = fixture("failed-read");
++    failed.failReads();
++    expect(
++      await reconcilePermissionResponse({ ...failed.input, response: { behavior: "allow" } }),
++    ).toBe("unavailable");
++    expect(failed.sent).toEqual([]);
++  });
++
++  it("coalesces double taps, reports uncertainty, and only reads on subsequent attempts", async () => {
++    vi.useFakeTimers();
++    const f = fixture("uncertain");
++    const first = reconcilePermissionResponse({ ...f.input, response: { behavior: "deny" } });
++    const second = reconcilePermissionResponse({ ...f.input, response: { behavior: "allow" } });
++    expect(second).toBe(first);
++    await vi.advanceTimersByTimeAsync(500);
++    expect(await first).toBe("uncertain");
++    expect(await reconcilePermissionResponse(f.input)).toBe("uncertain");
++    expect(await reconcilePermissionResponse({ ...f.input, response: { behavior: "allow" } })).toBe(
++      "uncertain",
++    );
++    f.setPending(false);
++    expect(await reconcilePermissionResponse(f.input)).toBe("complete");
++    expect(f.sent).toEqual([["agent", "request", { behavior: "deny" }, 500]]);
++  });
++
++  it("preserves uncertainty across disconnect and a replacement client", async () => {
++    const f = fixture("reconnected");
++    f.client.respondToPermissionAndWait = async (...args) => {
++      f.sent.push(args);
++      f.disconnect();
++      throw new Error("Disconnected");
++    };
++    expect(await reconcilePermissionResponse({ ...f.input, response: { behavior: "allow" } })).toBe(
++      "uncertain",
++    );
++    const replacement = fixture("reconnected");
++    expect(
++      await reconcilePermissionResponse({ ...replacement.input, response: { behavior: "allow" } }),
++    ).toBe("uncertain");
++    expect(replacement.sent).toEqual([]);
++    replacement.failReads();
++    expect(await reconcilePermissionResponse(replacement.input)).toBe("uncertain");
++  });
++
++  it("keeps identical request ids on different hosts independent", async () => {
++    const f = fixture("other-host");
++    f.client.respondToPermissionAndWait = async (...args) => {
++      f.sent.push(args);
++      f.setPending(false);
++      throw new Error("No acknowledgement");
++    };
++    expect(await reconcilePermissionResponse(f.input)).toBe("ready");
++    expect(
++      await reconcilePermissionResponse({
++        ...f.input,
++        response: { behavior: "allow", updatedInput: { answers: { Choice: "Final" } } },
++      }),
++    ).toBe("complete");
++    expect(f.sent).toEqual([
++      [
++        "agent",
++        "request",
++        { behavior: "allow", updatedInput: { answers: { Choice: "Final" } } },
++        500,
++      ],
++    ]);
++  });
++});
+diff --git a/packages/app/src/agent-stream/permission-response.ts b/packages/app/src/agent-stream/permission-response.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/app/src/agent-stream/permission-response.ts
+@@ -0,0 +1,69 @@
++import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
++import type { AgentPermissionResponse } from "@getpaseo/protocol/agent-types";
++
++export type PermissionResponseClient = Pick<
++  DaemonClient,
++  "isConnected" | "fetchAgent" | "respondToPermissionAndWait"
++>;
++export type PermissionResponseOutcome =
++  | "ready"
++  | "complete"
++  | "stale"
++  | "uncertain"
++  | "unavailable";
++
++// Keep an ambiguous response locked across card remounts and connection generations.
++// This is an in-memory submission guard, never a source of pending permission state.
++const attemptedRequests = new Set<string>();
++const inFlight = new Map<string, Promise<PermissionResponseOutcome>>();
++
++export function reconcilePermissionResponse(input: {
++  serverId: string;
++  agentId: string;
++  requestId: string;
++  client: PermissionResponseClient;
++  response?: AgentPermissionResponse;
++  timeoutMs?: number;
++}): Promise<PermissionResponseOutcome> {
++  const key = JSON.stringify([input.serverId, input.agentId, input.requestId]);
++  const existing = inFlight.get(key);
++  if (existing) return existing;
++  const operation = run().finally(() => inFlight.delete(key));
++  inFlight.set(key, operation);
++  return operation;
++
++  async function run(): Promise<PermissionResponseOutcome> {
++    const { client, agentId, requestId } = input;
++    const timeoutMs = input.timeoutMs ?? 15_000;
++    const deadline = Date.now() + timeoutMs;
++    const fetchPending = async () => {
++      if (!client.isConnected) throw new Error("Host disconnected");
++      const result = await client.fetchAgent({
++        agentId,
++        timeout: Math.max(1, Math.min(5_000, deadline - Date.now())),
++      });
++      return result?.agent.pendingPermissions.some((request) => request.id === requestId) ?? false;
++    };
++    try {
++      if (!(await fetchPending())) {
++        return attemptedRequests.has(key) ? "complete" : "stale";
++      }
++      if (attemptedRequests.has(key)) return "uncertain";
++      if (!input.response) return "ready";
++      if (!client.isConnected) return "unavailable";
++      attemptedRequests.add(key);
++      // This existing SDK method sends with skipQueue:true. Its acknowledgement is optional
++      // evidence: some providers apply the answer without emitting permission_resolved.
++      void client
++        .respondToPermissionAndWait(agentId, requestId, input.response, timeoutMs)
++        .catch(() => undefined);
++      do {
++        if (!(await fetchPending())) return "complete";
++        await new Promise<void>((resolve) => setTimeout(resolve, 250));
++      } while (Date.now() < deadline);
++      return "uncertain";
++    } catch {
++      return attemptedRequests.has(key) ? "uncertain" : "unavailable";
++    }
++  }
++}
+diff --git a/packages/app/src/agent-stream/view.tsx b/packages/app/src/agent-stream/view.tsx
+--- a/packages/app/src/agent-stream/view.tsx
++++ b/packages/app/src/agent-stream/view.tsx
+@@ -60,6 +60,8 @@
+ import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+ import { ToolCallDetailsContent } from "@/components/tool-call-details";
+ import { QuestionFormCard } from "@/components/question-form-card";
++import { reconcilePermissionResponse } from "./permission-response";
++import { PermissionResponseFeedback } from "./permission-response-feedback";
+ import { ToolCallSheetProvider } from "@/components/tool-call-sheet";
+ import {
+   prepareToolCallHistory,
+@@ -138,6 +140,7 @@
+ }
+ 
+ function renderPendingPermissionsNode(input: {
++  serverId: string;
+   pendingPermissions: PendingPermission[];
+   client: DaemonClient | null;
+ }): ReactNode {
+@@ -147,7 +150,12 @@
+   return (
+     <View style={stylesheet.permissionsContainer}>
+       {input.pendingPermissions.map((permission) => (
+-        <PermissionRequestCard key={permission.key} permission={permission} client={input.client} />
++        <PermissionRequestCard
++          key={JSON.stringify([input.serverId, permission.agentId, permission.request.id])}
++          serverId={input.serverId}
++          permission={permission}
++          client={input.client}
++        />
+       ))}
+     </View>
+   );
+@@ -939,10 +947,11 @@
+     const pendingPermissionsNode = useMemo(
+       () =>
+         renderPendingPermissionsNode({
++          serverId: resolvedServerId,
+           pendingPermissions: pendingPermissionItems,
+           client,
+         }),
+-      [client, pendingPermissionItems],
++      [client, pendingPermissionItems, resolvedServerId],
+     );
+     const turnFooterNode = useMemo(
+       () =>
+@@ -1379,9 +1388,11 @@
+ }
+ 
+ function PermissionRequestCard({
++  serverId,
+   permission,
+   client,
+ }: {
++  serverId: string;
+   permission: PendingPermission;
+   client: DaemonClient | null;
+ }) {
+@@ -1447,36 +1458,54 @@
+ 
+   const permissionMutation = useMutation({
+     mutationFn: async (input: {
++      serverId: string;
++      client: DaemonClient | null;
+       agentId: string;
+       requestId: string;
+-      response: AgentPermissionResponse;
++      response?: AgentPermissionResponse;
+     }) => {
+-      if (!client) {
+-        throw new Error(t("common.errors.daemonClientUnavailable"));
++      if (!input.client) {
++        return "unavailable" as const;
+       }
+-      return client.respondToPermissionAndWait(
+-        input.agentId,
+-        input.requestId,
+-        input.response,
+-        15000,
+-      );
++      return reconcilePermissionResponse({ ...input, client: input.client });
+     },
++    onSuccess: (outcome, input) => {
++      if (outcome !== "complete" && outcome !== "stale") return;
++      useSessionStore.getState().setPendingPermissions(input.serverId, (current) => {
++        const next = new Map(current);
++        for (const [key, pending] of next) {
++          if (pending.agentId === input.agentId && pending.request.id === input.requestId) {
++            next.delete(key);
++          }
++        }
++        return next;
++      });
++    },
++    retry: false,
+   });
+   const {
+     reset: resetPermissionMutation,
+     mutateAsync: respondToPermission,
+-    isPending: isResponding,
++    isPending,
+   } = permissionMutation;
++  const responseStatus = isPending ? "pending" : (permissionMutation.data ?? "ready");
++  const isResponding =
++    isPending ||
++    responseStatus === "uncertain" ||
++    responseStatus === "complete" ||
++    responseStatus === "stale";
+ 
+   const [respondingActionId, setRespondingActionId] = useState<string | null>(null);
+ 
+   useEffect(() => {
+     resetPermissionMutation();
+     setRespondingActionId(null);
+-  }, [permission.request.id, resetPermissionMutation]);
++  }, [serverId, permission.agentId, permission.request.id, resetPermissionMutation]);
+   const handleResponse = useCallback(
+-    (response: AgentPermissionResponse) => {
+-      respondToPermission({
++    (response?: AgentPermissionResponse) => {
++      void respondToPermission({
++        serverId,
++        client,
+         agentId: permission.agentId,
+         requestId: permission.request.id,
+         response,
+@@ -1484,7 +1513,11 @@
+         console.error("[PermissionRequestCard] Failed to respond to permission:", error);
+       });
+     },
+-    [permission.agentId, permission.request.id, respondToPermission],
++    [client, serverId, permission.agentId, permission.request.id, respondToPermission],
++  );
++  const handleCheckStatus = useCallback(() => handleResponse(), [handleResponse]);
++  const responseFeedback = (
++    <PermissionResponseFeedback status={responseStatus} onCheckStatus={handleCheckStatus} />
+   );
+   const handleActionPress = useCallback(
+     (action: AgentPermissionAction) => {
+@@ -1515,16 +1548,21 @@
+ 
+   if (request.kind === "question") {
+     return (
+-      <QuestionFormCard
+-        permission={permission}
+-        onRespond={handleResponse}
+-        isResponding={isResponding}
+-      />
++      <View style={stylesheet.permissionsContainer}>
++        {responseFeedback}
++        <QuestionFormCard
++          permission={permission}
++          onRespond={handleResponse}
++          isResponding={isPending}
++          isResponseBlocked={isResponding}
++        />
++      </View>
+     );
+   }
+ 
+   const footer = (
+     <>
++      {responseFeedback}
+       <Text testID="permission-request-question" style={permissionStyles.question}>
+         {t("agentStream.permission.question")}
+       </Text>
+@@ -1532,7 +1570,7 @@
+       <View style={optionsContainerStyle}>
+         {resolvedActions.map((action) => {
+           const isPrimary = action.variant === "primary";
+-          const isRespondingAction = respondingActionId === action.id;
++          const isRespondingAction = isPending && respondingActionId === action.id;
+           const Icon = action.behavior === "allow" ? ThemedCheckIcon : ThemedXIcon;
+           let testID: string;
+           if (action.behavior === "deny") testID = "permission-request-deny";
+diff --git a/packages/app/src/app/_layout.tsx b/packages/app/src/app/_layout.tsx
+--- a/packages/app/src/app/_layout.tsx
++++ b/packages/app/src/app/_layout.tsx
+@@ -4,6 +4,8 @@
+ import { QueryClientProvider } from "@tanstack/react-query";
+ import * as Linking from "expo-linking";
+ import * as Notifications from "expo-notifications";
++import { isPreviewNotificationDiagnosticEnabled } from "@/push-notifications/preview-diagnostic-enabled";
++import { shouldShowPreviewNotification } from "@/push-notifications/preview-diagnostic";
+ import { Stack, useNavigationContainerRef, usePathname, useRouter } from "expo-router";
+ import {
+   createContext,
+@@ -227,17 +229,30 @@
+     }
+ 
+     Notifications.setNotificationHandler({
+-      handleNotification: async () => ({
+-        // When the app is open, don't show OS banners.
+-        shouldShowAlert: false,
+-        shouldShowBanner: false,
+-        shouldShowList: false,
+-        shouldPlaySound: false,
+-        shouldSetBadge: false,
+-      }),
++      handleNotification: async (notification) => {
++        const showDiagnostic = shouldShowPreviewNotification({
++          enabled: isPreviewNotificationDiagnosticEnabled,
++          data: notification.request.content.data,
++        });
++        return {
++          // Other notifications retain the existing foreground suppression.
++          shouldShowAlert: showDiagnostic,
++          shouldShowBanner: showDiagnostic,
++          shouldShowList: showDiagnostic,
++          shouldPlaySound: showDiagnostic,
++          shouldSetBadge: false,
++        };
++      },
+     });
+ 
+     const openFromResponse = (response: Notifications.NotificationResponse) => {
++      if (
++        shouldShowPreviewNotification({
++          enabled: isPreviewNotificationDiagnosticEnabled,
++          data: response.notification.request.content.data,
++        })
++      )
++        return;
+       const identifier = response.notification.request.identifier;
+       if (lastHandledIdRef.current === identifier) {
+         return;
+diff --git a/packages/app/src/components/question-form-card.tsx b/packages/app/src/components/question-form-card.tsx
+--- a/packages/app/src/components/question-form-card.tsx
++++ b/packages/app/src/components/question-form-card.tsx
+@@ -1,5 +1,5 @@
+ import { LoadingSpinner } from "@/components/ui/loading-spinner";
+-import { useState, useCallback, useMemo } from "react";
++import React, { useState, useCallback, useMemo } from "react";
+ import { View, Text, Pressable, type PressableStateCallbackType } from "react-native";
+ import { StyleSheet, useUnistyles } from "react-native-unistyles";
+ import { useIsCompactFormFactor } from "@/constants/layout";
+@@ -25,6 +25,7 @@
+   permission: PendingPermission;
+   onRespond: (response: AgentPermissionResponse) => void;
+   isResponding: boolean;
++  isResponseBlocked?: boolean;
+ }
+ 
+ const IS_WEB = isWeb;
+@@ -314,7 +315,20 @@
+   );
+ }
+ 
+-export function QuestionFormCard({ permission, onRespond, isResponding }: QuestionFormCardProps) {
++function questionResponseState(
++  pending: boolean,
++  blocked: boolean | undefined,
++  action: "submit" | "dismiss" | null,
++) {
++  return { disabled: pending || Boolean(blocked), activeAction: pending ? action : null };
++}
++
++export function QuestionFormCard({
++  permission,
++  onRespond,
++  isResponding: responsePending,
++  isResponseBlocked,
++}: QuestionFormCardProps) {
+   const { theme } = useUnistyles();
+   const { t } = useTranslation();
+   const isMobile = useIsCompactFormFactor();
+@@ -326,6 +340,11 @@
+   const [selections, setSelections] = useState<Record<number, Set<number>>>({});
+   const [otherTexts, setOtherTexts] = useState<Record<number, string>>({});
+   const [respondingAction, setRespondingAction] = useState<"submit" | "dismiss" | null>(null);
++  const { disabled: isResponding, activeAction } = questionResponseState(
++    responsePending,
++    isResponseBlocked,
++    respondingAction,
++  );
+   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
+ 
+   const toggleOption = useCallback(
+@@ -575,7 +594,7 @@
+           accessibilityLabel={dismissLabel}
+           testID="question-form-dismiss"
+         >
+-          {respondingAction === "dismiss" ? (
++          {activeAction === "dismiss" ? (
+             <LoadingSpinner size="small" color={theme.colors.foregroundMuted} />
+           ) : (
+             <View style={styles.actionContent}>
+@@ -593,7 +612,7 @@
+           accessibilityLabel={primaryActionLabel}
+           testID="question-form-primary-action"
+         >
+-          {respondingAction === "submit" ? (
++          {activeAction === "submit" ? (
+             <LoadingSpinner size="small" color={theme.colors.accentForeground} />
+           ) : (
+             <View style={styles.actionContent}>
 diff --git a/packages/app/src/components/root-error-boundary.test.tsx b/packages/app/src/components/root-error-boundary.test.tsx
 --- a/packages/app/src/components/root-error-boundary.test.tsx
 +++ b/packages/app/src/components/root-error-boundary.test.tsx
@@ -341,6 +1070,423 @@ diff --git a/packages/app/src/constants/layout.ts b/packages/app/src/constants/l
  }
  
  // SplitContainer relies on dnd-kit and DOM-backed accessibility helpers.
+diff --git a/packages/app/src/i18n/resources/ar.ts b/packages/app/src/i18n/resources/ar.ts
+--- a/packages/app/src/i18n/resources/ar.ts
++++ b/packages/app/src/i18n/resources/ar.ts
+@@ -212,6 +212,14 @@
+       implement: "ينفذ",
+       question: "كيف تريد المتابعة؟",
+       proposedPlan: "الخطة المقترحة",
++      response: {
++        pending: "جارٍ التحقق من حالة الطلب…",
++        complete: "لم يعد هذا الطلب معلقًا.",
++        stale: "لم يعد هذا الطلب معلقًا. لم يُرسل أي رد.",
++        uncertain: "نتيجة الرد غير مؤكدة. تحقق من الحالة قبل اتخاذ إجراء آخر.",
++        unavailable: "تعذر التحقق من هذا الطلب. أعد الاتصال بالمضيف وتحقق من الحالة.",
++        check: "التحقق من الحالة",
++      },
+     },
+   },
+   agentPanel: {
+@@ -1905,6 +1913,26 @@
+       vimHint: "تنطبق على ملفات المصدر في الويب وسطح المكتب.",
+     },
+     notifications: {
++      nativeDiagnostic: {
++        title: "اختبار إشعارات Aigo الأصلية",
++        instructions:
++          "شغّل الاختبار واسمح بالإشعارات ثم اقفل هاتفك. ستتم جدولة تنبيه محلي من Aigo بعد 15 ثانية. عُد إلى هنا وأرسل التقرير مع توضيح ما إذا رأيته.",
++        limit: "يفحص التنبيهات المحلية والتسجيل في APNs. لا يختبر التسليم عن بُعد ولا يرفع أي رمز.",
++        run: "تشغيل اختبار الإشعارات",
++        permission: "بانتظار إذن الإشعارات…",
++        local: "جارٍ جدولة التنبيه المحلي…",
++        registration: "جارٍ فحص التسجيل في APNs (حتى 10 ثوانٍ)…",
++        complete:
++          "اكتمل الاختبار. راجع النتائج أدناه. إذا رُفض الإذن، اسمح بإشعارات Aigo في إعدادات iOS. قد يشير خطأ التسجيل إلى مشكلة في التوقيع أو صلاحيات التطبيق.",
++        copy: "نسخ تقرير التشخيص",
++        tokenHint:
++          "يخفي التقرير العادي الرمز. انسخ تفاصيل التسجيل عند طلبها فقط؛ فهي تتضمن رمز الجهاز الكامل.",
++        copyToken: "نسخ تفاصيل التسجيل",
++        copied: "تم النسخ",
++        copyError: "تعذر النسخ: {{error}}",
++        notificationTitle: "اختبار إشعار Aigo المحلي",
++        notificationBody: "هذا اختبار محلي وليس إشعارًا فوريًا عن بُعد.",
++      },
+       title: "الإشعارات",
+       permission: "إذن الإشعارات",
+       refreshAccessibility: "تحديث إذن الإشعارات",
+diff --git a/packages/app/src/i18n/resources/en.ts b/packages/app/src/i18n/resources/en.ts
+--- a/packages/app/src/i18n/resources/en.ts
++++ b/packages/app/src/i18n/resources/en.ts
+@@ -209,6 +209,14 @@
+       implement: "Implement",
+       question: "How would you like to proceed?",
+       proposedPlan: "Proposed plan",
++      response: {
++        pending: "Checking request status…",
++        complete: "This request is no longer pending.",
++        stale: "This request is no longer pending. No response was sent.",
++        uncertain: "The response outcome is uncertain. Check status before taking further action.",
++        unavailable: "Cannot check this request. Reconnect to the host and check status.",
++        check: "Check status",
++      },
+     },
+   },
+   agentPanel: {
+@@ -1950,6 +1958,27 @@
+       vimHint: "Applies to source files on web and desktop.",
+     },
+     notifications: {
++      nativeDiagnostic: {
++        title: "Aigo native notification test",
++        instructions:
++          "Run the test, allow notifications, then lock your phone. A local Aigo alert is scheduled for 15 seconds later. Return here and send the report with whether you saw it.",
++        limit:
++          "This checks local alerts and APNs registration. Remote delivery is not tested; no token is uploaded.",
++        run: "Run notification test",
++        permission: "Waiting for notification permission…",
++        local: "Scheduling the local alert…",
++        registration: "Checking APNs registration (up to 10 seconds)…",
++        complete:
++          "Test finished. Review the results below. If permission is denied, allow Aigo notifications in iOS Settings. A registration error may describe a signing or entitlement problem.",
++        copy: "Copy diagnostic report",
++        tokenHint:
++          "The normal report hides the token. Copy registration details only if requested; it includes the full device token.",
++        copyToken: "Copy registration details",
++        copied: "Copied",
++        copyError: "Copy failed: {{error}}",
++        notificationTitle: "Aigo local notification test",
++        notificationBody: "This is a local test, not a remote push notification.",
++      },
+       title: "Notifications",
+       permission: "Notification permission",
+       refreshAccessibility: "Refresh notification permission",
+diff --git a/packages/app/src/i18n/resources/es.ts b/packages/app/src/i18n/resources/es.ts
+--- a/packages/app/src/i18n/resources/es.ts
++++ b/packages/app/src/i18n/resources/es.ts
+@@ -212,6 +212,16 @@
+       implement: "Implementar",
+       question: "¿Cómo le gustaría proceder?",
+       proposedPlan: "Plan propuesto",
++      response: {
++        pending: "Consultando el estado de la solicitud…",
++        complete: "Esta solicitud ya no está pendiente.",
++        stale: "Esta solicitud ya no está pendiente. No se envió ninguna respuesta.",
++        uncertain:
++          "El resultado de la respuesta es incierto. Consulta el estado antes de continuar.",
++        unavailable:
++          "No se puede consultar esta solicitud. Vuelve a conectarte al host y consulta el estado.",
++        check: "Consultar estado",
++      },
+     },
+   },
+   agentPanel: {
+@@ -1951,6 +1961,27 @@
+       vimHint: "Se aplica a archivos fuente en web y escritorio.",
+     },
+     notifications: {
++      nativeDiagnostic: {
++        title: "Prueba de notificaciones nativas de Aigo",
++        instructions:
++          "Ejecuta la prueba, permite las notificaciones y bloquea el teléfono. Se programará una alerta local de Aigo para dentro de 15 segundos. Vuelve aquí y envía el informe indicando si la viste.",
++        limit:
++          "Comprueba alertas locales y el registro en APNs. No prueba la entrega remota ni sube ningún token.",
++        run: "Probar notificaciones",
++        permission: "Esperando permiso de notificaciones…",
++        local: "Programando la alerta local…",
++        registration: "Comprobando el registro en APNs (hasta 10 segundos)…",
++        complete:
++          "Prueba terminada. Revisa los resultados. Si se denegó el permiso, permite las notificaciones de Aigo en Ajustes de iOS. Un error de registro puede indicar un problema de firma o de permisos de la app.",
++        copy: "Copiar informe de diagnóstico",
++        tokenHint:
++          "El informe normal oculta el token. Copia los datos de registro solo si se solicitan; incluyen el token completo del dispositivo.",
++        copyToken: "Copiar datos de registro",
++        copied: "Copiado",
++        copyError: "Error al copiar: {{error}}",
++        notificationTitle: "Prueba de notificación local de Aigo",
++        notificationBody: "Esta es una prueba local, no una notificación push remota.",
++      },
+       title: "Notificaciones",
+       permission: "Permiso de notificaciones",
+       refreshAccessibility: "Actualizar permiso de notificaciones",
+diff --git a/packages/app/src/i18n/resources/fr.ts b/packages/app/src/i18n/resources/fr.ts
+--- a/packages/app/src/i18n/resources/fr.ts
++++ b/packages/app/src/i18n/resources/fr.ts
+@@ -214,6 +214,16 @@
+       implement: "Mettre en œuvre",
+       question: "Comment souhaitez-vous procéder?",
+       proposedPlan: "Plan proposé",
++      response: {
++        pending: "Vérification de l’état de la demande…",
++        complete: "Cette demande n’est plus en attente.",
++        stale: "Cette demande n’est plus en attente. Aucune réponse n’a été envoyée.",
++        uncertain:
++          "Le résultat de la réponse est incertain. Vérifiez l’état avant toute autre action.",
++        unavailable:
++          "Impossible de vérifier cette demande. Reconnectez-vous à l’hôte et vérifiez l’état.",
++        check: "Vérifier l’état",
++      },
+     },
+   },
+   agentPanel: {
+@@ -1956,6 +1966,27 @@
+       vimHint: "S’applique aux fichiers source sur le web et le bureau.",
+     },
+     notifications: {
++      nativeDiagnostic: {
++        title: "Test des notifications natives Aigo",
++        instructions:
++          "Lancez le test, autorisez les notifications, puis verrouillez votre téléphone. Une alerte locale Aigo est programmée dans 15 secondes. Revenez ici et envoyez le rapport en indiquant si vous l’avez vue.",
++        limit:
++          "Ce test vérifie les alertes locales et l’inscription APNs. La réception à distance n’est pas testée ; aucun jeton n’est envoyé.",
++        run: "Tester les notifications",
++        permission: "En attente de l’autorisation des notifications…",
++        local: "Programmation de l’alerte locale…",
++        registration: "Vérification de l’inscription APNs (10 secondes maximum)…",
++        complete:
++          "Test terminé. Consultez les résultats. Si l’autorisation est refusée, autorisez les notifications Aigo dans Réglages iOS. Une erreur d’inscription peut signaler un problème de signature ou de droits de l’app.",
++        copy: "Copier le rapport de diagnostic",
++        tokenHint:
++          "Le rapport normal masque le jeton. Copiez les détails d’inscription uniquement sur demande : ils contiennent le jeton complet de l’appareil.",
++        copyToken: "Copier les détails d’inscription",
++        copied: "Copié",
++        copyError: "Échec de la copie : {{error}}",
++        notificationTitle: "Test de notification locale Aigo",
++        notificationBody: "Ceci est un test local, pas une notification push à distance.",
++      },
+       title: "Notifications",
+       permission: "Autorisation des notifications",
+       refreshAccessibility: "Actualiser l’autorisation des notifications",
+diff --git a/packages/app/src/i18n/resources/ja.ts b/packages/app/src/i18n/resources/ja.ts
+--- a/packages/app/src/i18n/resources/ja.ts
++++ b/packages/app/src/i18n/resources/ja.ts
+@@ -212,6 +212,14 @@
+       implement: "実装",
+       question: "どのように続けますか？",
+       proposedPlan: "提案されたプラン",
++      response: {
++        pending: "リクエストの状態を確認中…",
++        complete: "このリクエストは保留中ではありません。",
++        stale: "このリクエストは保留中ではありません。応答は送信されませんでした。",
++        uncertain: "応答の結果を確認できません。次の操作の前に状態を確認してください。",
++        unavailable: "このリクエストを確認できません。ホストに再接続して状態を確認してください。",
++        check: "状態を確認",
++      },
+     },
+   },
+   agentPanel: {
+@@ -1923,6 +1931,27 @@
+       vimHint: "Web とデスクトップのソースファイルに適用されます。",
+     },
+     notifications: {
++      nativeDiagnostic: {
++        title: "Aigo ネイティブ通知テスト",
++        instructions:
++          "テストを実行し、通知を許可してから端末をロックしてください。15秒後に Aigo のローカル通知が予定されます。ここに戻り、通知が表示されたかどうかとレポートを送ってください。",
++        limit:
++          "ローカル通知と APNs 登録を確認します。リモート配信はテストせず、トークンも送信しません。",
++        run: "通知テストを実行",
++        permission: "通知の許可を待っています…",
++        local: "ローカル通知を予約中…",
++        registration: "APNs 登録を確認中（最大10秒）…",
++        complete:
++          "テスト完了。以下の結果を確認してください。許可が拒否された場合は iOS 設定で Aigo の通知を許可してください。登録エラーは署名やアプリの権限の問題を示す場合があります。",
++        copy: "診断レポートをコピー",
++        tokenHint:
++          "通常のレポートではトークンを隠します。登録詳細には完全な端末トークンが含まれるため、依頼された場合のみコピーしてください。",
++        copyToken: "登録詳細をコピー",
++        copied: "コピーしました",
++        copyError: "コピーに失敗しました: {{error}}",
++        notificationTitle: "Aigo ローカル通知テスト",
++        notificationBody: "これはローカルテストであり、リモートプッシュ通知ではありません。",
++      },
+       title: "通知",
+       permission: "通知の権限",
+       refreshAccessibility: "通知の権限を更新",
+diff --git a/packages/app/src/i18n/resources/ko.ts b/packages/app/src/i18n/resources/ko.ts
+--- a/packages/app/src/i18n/resources/ko.ts
++++ b/packages/app/src/i18n/resources/ko.ts
+@@ -212,6 +212,14 @@
+       implement: "구현",
+       question: "어떻게 진행할까요?",
+       proposedPlan: "제안된 계획",
++      response: {
++        pending: "요청 상태 확인 중…",
++        complete: "이 요청은 더 이상 대기 중이 아닙니다.",
++        stale: "이 요청은 더 이상 대기 중이 아닙니다. 응답을 보내지 않았습니다.",
++        uncertain: "응답 결과를 확인할 수 없습니다. 다음 작업 전에 상태를 확인하세요.",
++        unavailable: "요청을 확인할 수 없습니다. 호스트에 다시 연결하고 상태를 확인하세요.",
++        check: "상태 확인",
++      },
+     },
+   },
+   agentPanel: {
+@@ -1915,6 +1923,27 @@
+       vimHint: "웹 및 데스크톱의 소스 파일에 적용됩니다.",
+     },
+     notifications: {
++      nativeDiagnostic: {
++        title: "Aigo 기본 알림 테스트",
++        instructions:
++          "테스트를 실행하고 알림을 허용한 다음 휴대폰을 잠그세요. 15초 후 Aigo 로컬 알림이 예약됩니다. 여기로 돌아와 알림을 보았는지와 함께 보고서를 보내세요.",
++        limit:
++          "로컬 알림과 APNs 등록을 확인합니다. 원격 전송은 테스트하지 않으며 토큰은 업로드되지 않습니다.",
++        run: "알림 테스트 실행",
++        permission: "알림 권한을 기다리는 중…",
++        local: "로컬 알림을 예약하는 중…",
++        registration: "APNs 등록을 확인하는 중(최대 10초)…",
++        complete:
++          "테스트가 완료되었습니다. 아래 결과를 확인하세요. 권한이 거부되면 iOS 설정에서 Aigo 알림을 허용하세요. 등록 오류는 서명 또는 앱 권한 문제를 나타낼 수 있습니다.",
++        copy: "진단 보고서 복사",
++        tokenHint:
++          "일반 보고서는 토큰을 숨깁니다. 등록 세부 정보에는 전체 기기 토큰이 포함되므로 요청받은 경우에만 복사하세요.",
++        copyToken: "등록 세부 정보 복사",
++        copied: "복사됨",
++        copyError: "복사 실패: {{error}}",
++        notificationTitle: "Aigo 로컬 알림 테스트",
++        notificationBody: "원격 푸시 알림이 아닌 로컬 테스트입니다.",
++      },
+       title: "알림",
+       permission: "알림 권한",
+       refreshAccessibility: "알림 권한 새로 고침",
+diff --git a/packages/app/src/i18n/resources/pt-BR.ts b/packages/app/src/i18n/resources/pt-BR.ts
+--- a/packages/app/src/i18n/resources/pt-BR.ts
++++ b/packages/app/src/i18n/resources/pt-BR.ts
+@@ -212,6 +212,15 @@
+       implement: "Implementar",
+       question: "Como você quer prosseguir?",
+       proposedPlan: "Plano proposto",
++      response: {
++        pending: "Verificando o status da solicitação…",
++        complete: "Esta solicitação não está mais pendente.",
++        stale: "Esta solicitação não está mais pendente. Nenhuma resposta foi enviada.",
++        uncertain: "O resultado da resposta é incerto. Verifique o status antes de continuar.",
++        unavailable:
++          "Não foi possível verificar esta solicitação. Reconecte-se ao host e verifique o status.",
++        check: "Verificar status",
++      },
+     },
+   },
+   agentPanel: {
+@@ -1937,6 +1946,27 @@
+       vimHint: "Aplica-se a arquivos-fonte na web e no desktop.",
+     },
+     notifications: {
++      nativeDiagnostic: {
++        title: "Teste de notificações nativas do Aigo",
++        instructions:
++          "Execute o teste, permita notificações e bloqueie o celular. Um alerta local do Aigo será agendado para daqui a 15 segundos. Volte aqui e envie o relatório informando se o viu.",
++        limit:
++          "Verifica alertas locais e o registro no APNs. A entrega remota não é testada; nenhum token é enviado.",
++        run: "Testar notificações",
++        permission: "Aguardando permissão de notificações…",
++        local: "Agendando o alerta local…",
++        registration: "Verificando o registro no APNs (até 10 segundos)…",
++        complete:
++          "Teste concluído. Confira os resultados. Se a permissão foi negada, permita notificações do Aigo nos Ajustes do iOS. Um erro de registro pode indicar um problema de assinatura ou de direitos do app.",
++        copy: "Copiar relatório de diagnóstico",
++        tokenHint:
++          "O relatório normal oculta o token. Copie os detalhes do registro apenas se solicitado; eles incluem o token completo do dispositivo.",
++        copyToken: "Copiar detalhes do registro",
++        copied: "Copiado",
++        copyError: "Falha ao copiar: {{error}}",
++        notificationTitle: "Teste de notificação local do Aigo",
++        notificationBody: "Este é um teste local, não uma notificação push remota.",
++      },
+       title: "Notificações",
+       permission: "Permissão de notificações",
+       refreshAccessibility: "Atualizar permissão de notificações",
+diff --git a/packages/app/src/i18n/resources/ru.ts b/packages/app/src/i18n/resources/ru.ts
+--- a/packages/app/src/i18n/resources/ru.ts
++++ b/packages/app/src/i18n/resources/ru.ts
+@@ -212,6 +212,15 @@
+       implement: "Реализовать",
+       question: "Как бы вы хотели продолжить?",
+       proposedPlan: "Предлагаемый план",
++      response: {
++        pending: "Проверка статуса запроса…",
++        complete: "Этот запрос больше не ожидает ответа.",
++        stale: "Этот запрос больше не ожидает ответа. Ответ не отправлен.",
++        uncertain:
++          "Результат отправки ответа неизвестен. Проверьте статус перед дальнейшими действиями.",
++        unavailable: "Не удалось проверить запрос. Подключитесь к хосту и проверьте статус.",
++        check: "Проверить статус",
++      },
+     },
+   },
+   agentPanel: {
+@@ -1936,6 +1945,27 @@
+       vimHint: "Применяется к исходным файлам в веб- и настольной версии.",
+     },
+     notifications: {
++      nativeDiagnostic: {
++        title: "Проверка нативных уведомлений Aigo",
++        instructions:
++          "Запустите проверку, разрешите уведомления и заблокируйте телефон. Локальное уведомление Aigo запланировано через 15 секунд. Вернитесь сюда и отправьте отчёт, указав, видели ли вы его.",
++        limit:
++          "Проверяются локальные уведомления и регистрация APNs. Удалённая доставка не проверяется; токен никуда не отправляется.",
++        run: "Проверить уведомления",
++        permission: "Ожидание разрешения на уведомления…",
++        local: "Планирование локального уведомления…",
++        registration: "Проверка регистрации APNs (до 10 секунд)…",
++        complete:
++          "Проверка завершена. Просмотрите результаты. Если доступ запрещён, разрешите уведомления Aigo в настройках iOS. Ошибка регистрации может указывать на проблему подписи или прав приложения.",
++        copy: "Копировать отчёт диагностики",
++        tokenHint:
++          "В обычном отчёте токен скрыт. Копируйте сведения о регистрации только по запросу: они содержат полный токен устройства.",
++        copyToken: "Копировать сведения о регистрации",
++        copied: "Скопировано",
++        copyError: "Не удалось скопировать: {{error}}",
++        notificationTitle: "Проверка локального уведомления Aigo",
++        notificationBody: "Это локальная проверка, а не удалённое push-уведомление.",
++      },
+       title: "Уведомления",
+       permission: "Разрешение на уведомления",
+       refreshAccessibility: "Обновить разрешение на уведомления",
+diff --git a/packages/app/src/i18n/resources/zh-CN.ts b/packages/app/src/i18n/resources/zh-CN.ts
+--- a/packages/app/src/i18n/resources/zh-CN.ts
++++ b/packages/app/src/i18n/resources/zh-CN.ts
+@@ -212,6 +212,14 @@
+       implement: "实施",
+       question: "你想如何继续？",
+       proposedPlan: "建议计划",
++      response: {
++        pending: "正在检查请求状态…",
++        complete: "此请求已不再等待处理。",
++        stale: "此请求已不再等待处理。未发送任何响应。",
++        uncertain: "响应结果尚不确定。请先检查状态，再采取其他操作。",
++        unavailable: "无法检查此请求。请重新连接主机并检查状态。",
++        check: "检查状态",
++      },
+     },
+   },
+   agentPanel: {
+@@ -1884,6 +1892,25 @@
+       vimHint: "适用于网页和桌面端的源文件。",
+     },
+     notifications: {
++      nativeDiagnostic: {
++        title: "Aigo 原生通知测试",
++        instructions:
++          "运行测试，允许通知，然后锁定手机。Aigo 本地提醒将安排在 15 秒后显示。返回此处，发送报告并说明是否看到了通知。",
++        limit: "此测试检查本地提醒和 APNs 注册。不测试远程推送，也不会上传令牌。",
++        run: "运行通知测试",
++        permission: "正在等待通知权限…",
++        local: "正在安排本地提醒…",
++        registration: "正在检查 APNs 注册（最多 10 秒）…",
++        complete:
++          "测试已完成。请查看以下结果。如果权限被拒绝，请在 iOS 设置中允许 Aigo 通知。注册错误可能说明签名或应用授权存在问题。",
++        copy: "复制诊断报告",
++        tokenHint: "普通报告会隐藏令牌。注册详情包含完整的设备令牌，请仅在被要求时复制。",
++        copyToken: "复制注册详情",
++        copied: "已复制",
++        copyError: "复制失败：{{error}}",
++        notificationTitle: "Aigo 本地通知测试",
++        notificationBody: "这是本地测试，不是远程推送通知。",
++      },
+       title: "通知",
+       permission: "通知权限",
+       refreshAccessibility: "刷新通知权限",
 diff --git a/packages/app/src/plugins/react-native/desktop-view-policy.test.ts b/packages/app/src/plugins/react-native/desktop-view-policy.test.ts
 new file mode 100644
 --- /dev/null
@@ -911,10 +2057,399 @@ diff --git a/packages/app/src/push-notifications/index.native.ts b/packages/app/
    return startSubscription(input);
  }
  
+diff --git a/packages/app/src/push-notifications/preview-diagnostic-enabled.ts b/packages/app/src/push-notifications/preview-diagnostic-enabled.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/app/src/push-notifications/preview-diagnostic-enabled.ts
+@@ -0,0 +1,7 @@
++import Constants from "expo-constants";
++import { Platform } from "react-native";
++
++export const isPreviewNotificationDiagnosticEnabled =
++  Platform.OS === "ios" &&
++  Constants.expoConfig?.extra?.aigoNativePreview === true &&
++  Constants.expoConfig?.extra?.aigoNotificationDiagnostics === true;
+diff --git a/packages/app/src/push-notifications/preview-diagnostic.test.ts b/packages/app/src/push-notifications/preview-diagnostic.test.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/app/src/push-notifications/preview-diagnostic.test.ts
+@@ -0,0 +1,216 @@
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { PermissionStatus } from "expo-modules-core";
++import type * as Notifications from "expo-notifications";
++import {
++  diagnosticError,
++  notificationDiagnosticReport,
++  PREVIEW_NOTIFICATION_TEST,
++  runNotificationDiagnostic,
++  shouldShowPreviewNotification,
++} from "./preview-diagnostic";
++
++const permission: Notifications.NotificationPermissionsStatus = {
++  status: PermissionStatus.GRANTED,
++  granted: true,
++  canAskAgain: true,
++  expires: "never",
++};
++const token: Notifications.NativeDevicePushToken = { type: "ios", data: "a".repeat(64) };
++const notification: Notifications.NotificationRequestInput = {
++  content: { title: "Aigo local test", data: { aigoDiagnostic: PREVIEW_NOTIFICATION_TEST } },
++  trigger: null,
++};
++
++function setup() {
++  const api = {
++    setAutoServerRegistrationEnabledAsync: vi
++      .fn<(enabled: boolean) => Promise<void>>()
++      .mockResolvedValue(undefined),
++    requestPermissionsAsync: vi
++      .fn<() => Promise<Notifications.NotificationPermissionsStatus>>()
++      .mockResolvedValue(permission),
++    scheduleNotificationAsync: vi.fn<() => Promise<string>>().mockResolvedValue("local-test-id"),
++    getDevicePushTokenAsync: vi
++      .fn<() => Promise<Notifications.DevicePushToken>>()
++      .mockResolvedValue(token),
++  };
++  const controller = new AbortController();
++  const onPhase = vi.fn();
++  return {
++    api,
++    controller,
++    run: () => runNotificationDiagnostic({ api, notification, signal: controller.signal, onPhase }),
++    onPhase,
++  };
++}
++
++afterEach(() => vi.useRealTimers());
++
++describe("preview native notification diagnostic", () => {
++  it("requests permission, schedules the supplied local alert, and registers natively", async () => {
++    const test = setup();
++    expect(await test.run()).toEqual({
++      permission: { status: "success", value: permission },
++      local: { status: "success", value: "local-test-id" },
++      registration: { status: "success", value: token },
++    });
++    expect(test.api.requestPermissionsAsync).toHaveBeenCalledWith({
++      ios: { allowAlert: true, allowSound: true, allowBadge: true },
++    });
++    expect(test.api.scheduleNotificationAsync).toHaveBeenCalledExactlyOnceWith(notification);
++    expect(test.api.setAutoServerRegistrationEnabledAsync).toHaveBeenCalledExactlyOnceWith(false);
++    expect(test.onPhase.mock.calls).toEqual([["permission"], ["local"], ["registration"]]);
++  });
++
++  it("reports denial without scheduling and still exposes a missing APNs entitlement", async () => {
++    const test = setup();
++    const denied = {
++      ...permission,
++      status: PermissionStatus.DENIED,
++      granted: false,
++      canAskAgain: false,
++    };
++    test.api.requestPermissionsAsync.mockResolvedValue(denied);
++    test.api.getDevicePushTokenAsync.mockRejectedValue(
++      new Error("no valid aps-environment entitlement string found"),
++    );
++    expect(await test.run()).toEqual({
++      permission: { status: "success", value: denied },
++      local: { status: "skipped" },
++      registration: {
++        status: "error",
++        message: "no valid aps-environment entitlement string found",
++      },
++    });
++    expect(test.api.scheduleNotificationAsync).not.toHaveBeenCalled();
++  });
++
++  it("keeps permission and scheduling failures visible independently of registration", async () => {
++    const test = setup();
++    test.api.scheduleNotificationAsync.mockRejectedValue(new Error("Scheduling unavailable"));
++    expect(await test.run()).toMatchObject({
++      local: { status: "error", message: "Scheduling unavailable" },
++      registration: { status: "success" },
++    });
++    test.api.requestPermissionsAsync.mockRejectedValue(new Error("Permission API unavailable"));
++    expect(await test.run()).toMatchObject({
++      permission: { status: "error", message: "Permission API unavailable" },
++      local: { status: "skipped" },
++    });
++  });
++
++  it("refuses native registration if disabling Expo auto-upload fails", async () => {
++    const test = setup();
++    test.api.setAutoServerRegistrationEnabledAsync.mockRejectedValue(
++      new Error("Cannot disable auto-upload"),
++    );
++    expect(await test.run()).toMatchObject({
++      registration: { status: "error", message: "Cannot disable auto-upload" },
++    });
++    expect(test.api.getDevicePushTokenAsync).not.toHaveBeenCalled();
++  });
++
++  it("finishes after a 10 second APNs timeout and ignores a late token", async () => {
++    vi.useFakeTimers();
++    const test = setup();
++    let resolveToken: (value: Notifications.DevicePushToken) => void = () => {};
++    test.api.getDevicePushTokenAsync.mockImplementation(
++      () =>
++        new Promise((resolve) => {
++          resolveToken = resolve;
++        }),
++    );
++    const pending = test.run();
++    await vi.advanceTimersByTimeAsync(10_000);
++    const result = await pending;
++    expect(result?.registration).toEqual({ status: "timeout" });
++    resolveToken(token);
++    await vi.advanceTimersByTimeAsync(0);
++    expect(result?.registration).toEqual({ status: "timeout" });
++    expect(vi.getTimerCount()).toBe(0);
++  });
++
++  it("bounds a stalled permission request and a stalled scheduler", async () => {
++    vi.useFakeTimers();
++    const test = setup();
++    test.api.requestPermissionsAsync.mockImplementation(() => new Promise(() => {}));
++    const permissionPending = test.run();
++    await vi.advanceTimersByTimeAsync(60_000);
++    expect(await permissionPending).toMatchObject({
++      permission: { status: "timeout" },
++      local: { status: "skipped" },
++    });
++    test.api.requestPermissionsAsync.mockResolvedValue(permission);
++    test.api.scheduleNotificationAsync.mockImplementation(() => new Promise(() => {}));
++    const schedulePending = test.run();
++    await vi.advanceTimersByTimeAsync(8_000);
++    expect(await schedulePending).toMatchObject({
++      local: { status: "timeout" },
++      registration: { status: "success" },
++    });
++  });
++
++  it("does not start another phase or publish a stale result after unmount", async () => {
++    const test = setup();
++    test.api.requestPermissionsAsync.mockImplementation(async () => {
++      test.controller.abort();
++      return permission;
++    });
++    expect(await test.run()).toBeNull();
++    expect(test.api.scheduleNotificationAsync).not.toHaveBeenCalled();
++    expect(test.api.getDevicePushTokenAsync).not.toHaveBeenCalled();
++    expect(test.onPhase.mock.calls).toEqual([["permission"]]);
++  });
++
++  it("does not publish a token after leaving during registration", async () => {
++    const test = setup();
++    test.api.getDevicePushTokenAsync.mockImplementation(async () => {
++      test.controller.abort();
++      return token;
++    });
++    expect(await test.run()).toBeNull();
++  });
++
++  it("masks tokens in the ordinary report, includes signed identity, and separates remote proof", async () => {
++    const diagnostic = await setup().run();
++    if (!diagnostic) throw new Error("Expected a diagnostic result");
++    const identity = {
++      applicationId: "signed.aigo.preview",
++      nativeApplicationVersion: "0.7.5",
++      nativeBuildVersion: "7005999",
++      configuredBundle: "dev.aigo.preview",
++      configuredVersion: "0.7.5",
++      systemVersion: "26",
++    };
++    const report = notificationDiagnosticReport({ identity, diagnostic, includeToken: false });
++    expect(report).not.toContain(token.data);
++    expect(report).toContain("signed.aigo.preview");
++    expect(report).toContain("dev.aigo.preview");
++    expect(report).toContain("Remote delivery: not tested");
++    expect(report).not.toContain("Registration timeout:");
++    expect(notificationDiagnosticReport({ identity, diagnostic, includeToken: true })).toContain(
++      token.data,
++    );
++    expect(diagnosticError(new Error(`Failed token ${token.data}`))).toBe(
++      "Failed token [redacted]",
++    );
++  });
++
++  it("only presents and intercepts explicitly marked preview diagnostics", () => {
++    expect(
++      shouldShowPreviewNotification({
++        enabled: true,
++        data: { aigoDiagnostic: PREVIEW_NOTIFICATION_TEST },
++      }),
++    ).toBe(true);
++    expect(
++      shouldShowPreviewNotification({
++        enabled: false,
++        data: { aigoDiagnostic: PREVIEW_NOTIFICATION_TEST },
++      }),
++    ).toBe(false);
++    expect(shouldShowPreviewNotification({ enabled: true, data: { agentId: "agent" } })).toBe(
++      false,
++    );
++  });
++});
+diff --git a/packages/app/src/push-notifications/preview-diagnostic.ts b/packages/app/src/push-notifications/preview-diagnostic.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/app/src/push-notifications/preview-diagnostic.ts
+@@ -0,0 +1,143 @@
++import type * as Notifications from "expo-notifications";
++
++export const PREVIEW_NOTIFICATION_TEST = "aigo-native-local-test";
++
++type Outcome<T> =
++  | { status: "success"; value: T }
++  | { status: "error"; message: string }
++  | { status: "timeout" };
++
++export interface NotificationDiagnostic {
++  permission: Outcome<Notifications.NotificationPermissionsStatus>;
++  local: Outcome<string> | { status: "skipped" };
++  registration: Outcome<Notifications.NativeDevicePushToken>;
++}
++
++interface DiagnosticInput {
++  api: Pick<
++    typeof Notifications,
++    | "requestPermissionsAsync"
++    | "scheduleNotificationAsync"
++    | "getDevicePushTokenAsync"
++    | "setAutoServerRegistrationEnabledAsync"
++  >;
++  notification: Notifications.NotificationRequestInput;
++  signal: AbortSignal;
++  onPhase: (phase: "permission" | "local" | "registration") => void;
++}
++
++// Native error text can include a token. Reports never include token-shaped strings from errors.
++export function diagnosticError(error: unknown): string {
++  const message = error instanceof Error ? error.message : String(error);
++  return message.replace(/[a-f\d]{32,}/gi, "[redacted]").slice(0, 1200);
++}
++
++async function bounded<T>(operation: () => Promise<T>, timeoutMs: number): Promise<Outcome<T>> {
++  let timer: ReturnType<typeof setTimeout> | undefined;
++  const timeout = new Promise<Outcome<T>>((resolve) => {
++    timer = setTimeout(() => resolve({ status: "timeout" }), timeoutMs);
++  });
++  const attempt = Promise.resolve()
++    .then(operation)
++    .then<Outcome<T>, Outcome<T>>(
++      (value) => ({ status: "success", value }),
++      (error: unknown) => ({ status: "error", message: diagnosticError(error) }),
++    );
++  try {
++    return await Promise.race([attempt, timeout]);
++  } finally {
++    clearTimeout(timer);
++  }
++}
++
++export async function runNotificationDiagnostic({
++  api,
++  notification,
++  signal,
++  onPhase,
++}: DiagnosticInput): Promise<NotificationDiagnostic | null> {
++  if (signal.aborted) return null;
++  onPhase("permission");
++  const permission = await bounded(
++    () =>
++      api.requestPermissionsAsync({
++        ios: { allowAlert: true, allowSound: true, allowBadge: true },
++      }),
++    60_000,
++  );
++  if (signal.aborted) return null;
++  let local: NotificationDiagnostic["local"] = { status: "skipped" };
++  if (permission.status === "success" && permission.value.granted) {
++    onPhase("local");
++    local = await bounded(() => api.scheduleNotificationAsync(notification), 8_000);
++  }
++  if (signal.aborted) return null;
++  onPhase("registration");
++  // Device registration talks to APNs through iOS. Never request an Expo token or publish this token.
++  const registration = await bounded<Notifications.NativeDevicePushToken>(async () => {
++    await api.setAutoServerRegistrationEnabledAsync(false);
++    if (signal.aborted) throw new Error("Diagnostic cancelled before native registration.");
++    const token = await api.getDevicePushTokenAsync();
++    if (token.type !== "ios" || typeof token.data !== "string" || token.data.length === 0) {
++      throw new Error("Native registration did not return an iOS device token.");
++    }
++    return { type: "ios", data: token.data };
++  }, 10_000);
++  if (signal.aborted) return null;
++  return { permission, local, registration };
++}
++
++export interface DiagnosticIdentity {
++  applicationId: string | null;
++  nativeApplicationVersion: string | null;
++  nativeBuildVersion: string | null;
++  configuredBundle: string | null;
++  configuredVersion: string | null;
++  systemVersion: string;
++}
++
++interface ReportInput {
++  identity: DiagnosticIdentity;
++  diagnostic: NotificationDiagnostic;
++  includeToken: boolean;
++}
++
++export function notificationDiagnosticReport({
++  identity,
++  diagnostic,
++  includeToken,
++}: ReportInput): string {
++  const { permission, local, registration } = diagnostic;
++  const lines = ["Aigo native notification diagnostic", JSON.stringify(identity, null, 2)];
++  lines.push(`Permission: ${JSON.stringify(permission)}`);
++  lines.push(`Local test: ${JSON.stringify(local)}`);
++  if (registration.status === "success") {
++    const token = includeToken
++      ? registration.value.data
++      : "[redacted; available via Copy registration details]";
++    lines.push(
++      `Native registration: success (${registration.value.type})`,
++      `Device token: ${token}`,
++    );
++  } else {
++    lines.push(`Native registration: ${JSON.stringify(registration)}`);
++  }
++  if (registration.status === "timeout") {
++    lines.push(
++      "Registration timeout: no result within 10 seconds; native registration may finish later. Reopen the app before retrying.",
++    );
++  }
++  lines.push(
++    "Local test delivery: user observation required; scheduling is not delivery proof.",
++    "Signed APNs entitlement/environment: not inspected.",
++    "Remote delivery: not tested. No token sent to Paseo, Expo push service, or an Aigo server.",
++  );
++  return lines.join("\n");
++}
++
++export function shouldShowPreviewNotification(input: {
++  enabled: boolean;
++  data: Record<string, unknown>;
++}): boolean {
++  return input.enabled && input.data.aigoDiagnostic === PREVIEW_NOTIFICATION_TEST;
++}
 diff --git a/packages/app/src/screens/settings-screen.tsx b/packages/app/src/screens/settings-screen.tsx
 --- a/packages/app/src/screens/settings-screen.tsx
 +++ b/packages/app/src/screens/settings-screen.tsx
-@@ -91,6 +91,7 @@
+@@ -85,12 +85,15 @@
+ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
+ import { DesktopPermissionsSection } from "@/desktop/components/desktop-permissions-section";
+ import { DesktopNotificationsSection } from "@/desktop/components/desktop-notifications-section";
++import { NativeNotificationDiagnosticSection } from "@/screens/settings/native-notification-diagnostic-section";
++import { isPreviewNotificationDiagnosticEnabled } from "@/push-notifications/preview-diagnostic-enabled";
+ import { BrowserDataSection } from "@/desktop/browser/settings/browser-data-section";
+ import { IntegrationsSection } from "@/desktop/components/integrations-section";
+ import { isElectronRuntime } from "@/desktop/host";
  import { useDesktopAppUpdater } from "@/desktop/updates/use-desktop-app-updater";
  import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
  import { resolveAppVersion } from "@/utils/app-version";
@@ -922,7 +2457,7 @@ diff --git a/packages/app/src/screens/settings-screen.tsx b/packages/app/src/scr
  import { useAppDiagnosticStore } from "@/diagnostics/store";
  import { settingsStyles } from "@/styles/settings";
  import { THINKING_TONE_NATIVE_PCM_BASE64 } from "@/utils/thinking-tone.native-pcm";
-@@ -615,6 +616,13 @@
+@@ -615,6 +618,13 @@
    );
  }
  
@@ -936,7 +2471,21 @@ diff --git a/packages/app/src/screens/settings-screen.tsx b/packages/app/src/scr
  function normalizeVersion(version: string | null | undefined): string | null {
    const trimmed = version?.trim();
    if (!trimmed) return null;
-@@ -1195,7 +1203,7 @@
+@@ -1049,9 +1059,10 @@
+   const hasHosts = sortedHosts.length > 0;
+   const enableBuiltInDaemonOption = useEnableBuiltInDaemonOption();
+   const isDesktopApp = isElectronRuntime();
+-  const items = SIDEBAR_SECTION_ITEMS.filter(
+-    (item) => (!item.desktopOnly || isDesktopApp) && (!item.webOnly || isWeb),
+-  );
++  const items = SIDEBAR_SECTION_ITEMS.filter((item) => {
++    if (item.id === "notifications" && isPreviewNotificationDiagnosticEnabled) return true;
++    return (!item.desktopOnly || isDesktopApp) && (!item.webOnly || isWeb);
++  });
+   const insets = useSafeAreaInsets();
+   const isDesktop = layout === "desktop";
+   const outerContainerStyle = useMemo(
+@@ -1195,7 +1206,7 @@
    const lastOpenedAddHostIntentRef = useRef<string | null>(null);
    const isDesktopApp = isElectronRuntime();
    const appVersion = resolveAppVersion();
@@ -945,6 +2494,196 @@ diff --git a/packages/app/src/screens/settings-screen.tsx b/packages/app/src/scr
    const isCompactLayout = useIsCompactFormFactor();
    const insets = useSafeAreaInsets();
    const insetBottomStyle = useMemo(() => ({ paddingBottom: insets.bottom }), [insets.bottom]);
+@@ -1489,6 +1500,8 @@
+           case "integrations":
+             return isDesktopApp ? <IntegrationsSection /> : null;
+           case "notifications":
++            if (isPreviewNotificationDiagnosticEnabled)
++              return <NativeNotificationDiagnosticSection />;
+             return isDesktopApp ? <DesktopNotificationsSection /> : null;
+           case "permissions":
+             return isDesktopApp ? <DesktopPermissionsSection /> : null;
+diff --git a/packages/app/src/screens/settings/native-notification-diagnostic-section.tsx b/packages/app/src/screens/settings/native-notification-diagnostic-section.tsx
+new file mode 100644
+--- /dev/null
++++ b/packages/app/src/screens/settings/native-notification-diagnostic-section.tsx
+@@ -0,0 +1,176 @@
++import { useEffect, useRef, useState } from "react";
++import { Platform, Text, View } from "react-native";
++import { useTranslation } from "react-i18next";
++import * as Application from "expo-application";
++import * as Clipboard from "expo-clipboard";
++import Constants from "expo-constants";
++import * as Notifications from "expo-notifications";
++import { Button } from "@/components/ui/button";
++import { useStableEvent } from "@/hooks/use-stable-event";
++import { SettingsSection } from "@/screens/settings/settings-section";
++import { settingsStyles } from "@/styles/settings";
++import { isPreviewNotificationDiagnosticEnabled } from "@/push-notifications/preview-diagnostic-enabled";
++import {
++  diagnosticError,
++  notificationDiagnosticReport,
++  PREVIEW_NOTIFICATION_TEST,
++  runNotificationDiagnostic,
++  type NotificationDiagnostic,
++} from "@/push-notifications/preview-diagnostic";
++
++type DiagnosticState =
++  | { status: "idle" }
++  | { status: "running"; phase: "permission" | "local" | "registration" }
++  | {
++      status: "complete";
++      diagnostic: NotificationDiagnostic;
++      copy: "idle" | "copying" | "copied" | "error";
++      copyError: string;
++    };
++
++export function NativeNotificationDiagnosticSection() {
++  const { t } = useTranslation();
++  const [state, setState] = useState<DiagnosticState>({ status: "idle" });
++  const activeRun = useRef<AbortController | null>(null);
++  useEffect(() => () => activeRun.current?.abort(), []);
++
++  async function run() {
++    if (activeRun.current && !activeRun.current.signal.aborted) return;
++    const controller = new AbortController();
++    activeRun.current = controller;
++    const diagnostic = await runNotificationDiagnostic({
++      api: Notifications,
++      signal: controller.signal,
++      onPhase: (phase) => setState({ status: "running", phase }),
++      notification: {
++        content: {
++          title: t("settings.notifications.nativeDiagnostic.notificationTitle"),
++          body: t("settings.notifications.nativeDiagnostic.notificationBody"),
++          sound: "default",
++          data: { aigoDiagnostic: PREVIEW_NOTIFICATION_TEST },
++        },
++        trigger: {
++          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
++          seconds: 15,
++          repeats: false,
++        },
++      },
++    });
++    if (!diagnostic) return;
++    controller.abort();
++    setState({ status: "complete", diagnostic, copy: "idle", copyError: "" });
++  }
++
++  function report(diagnostic: NotificationDiagnostic, includeToken: boolean) {
++    return notificationDiagnosticReport({
++      identity: {
++        applicationId: Application.applicationId,
++        nativeApplicationVersion: Application.nativeApplicationVersion,
++        nativeBuildVersion: Application.nativeBuildVersion,
++        configuredBundle: Constants.expoConfig?.ios?.bundleIdentifier ?? null,
++        configuredVersion: Constants.expoConfig?.version ?? null,
++        systemVersion: String(Platform.Version),
++      },
++      diagnostic,
++      includeToken,
++    });
++  }
++
++  async function copyReport(includeToken: boolean) {
++    if (state.status !== "complete") return;
++    const diagnostic = state.diagnostic;
++    setState({ ...state, copy: "copying", copyError: "" });
++    try {
++      await Clipboard.setStringAsync(report(diagnostic, includeToken));
++      setState((current) => {
++        if (current.status !== "complete" || current.diagnostic !== diagnostic) return current;
++        return { ...current, copy: "copied" };
++      });
++    } catch (error) {
++      setState((current) => {
++        if (current.status !== "complete" || current.diagnostic !== diagnostic) return current;
++        return { ...current, copy: "error", copyError: diagnosticError(error) };
++      });
++    }
++  }
++
++  const handleRun = useStableEvent(() => {
++    void run();
++  });
++  const handleCopyReport = useStableEvent(() => {
++    void copyReport(false);
++  });
++  const handleCopyRegistration = useStableEvent(() => {
++    void copyReport(true);
++  });
++
++  if (!isPreviewNotificationDiagnosticEnabled) return null;
++  const running = state.status === "running";
++  return (
++    <SettingsSection title={t("settings.notifications.nativeDiagnostic.title")}>
++      <View style={settingsStyles.card}>
++        <View style={settingsStyles.row}>
++          <View style={settingsStyles.rowContent}>
++            <Text style={settingsStyles.rowTitle}>
++              {t("settings.notifications.nativeDiagnostic.instructions")}
++            </Text>
++            <Text style={settingsStyles.rowHint}>
++              {t("settings.notifications.nativeDiagnostic.limit")}
++            </Text>
++          </View>
++        </View>
++        <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
++          <Button onPress={handleRun} disabled={running} size="sm">
++            {t("settings.notifications.nativeDiagnostic.run")}
++          </Button>
++        </View>
++      </View>
++      {state.status === "running" ? (
++        <Text style={settingsStyles.rowHint}>
++          {t(`settings.notifications.nativeDiagnostic.${state.phase}`)}
++        </Text>
++      ) : null}
++      {state.status === "complete" ? (
++        <>
++          <Text style={settingsStyles.rowHint}>
++            {t("settings.notifications.nativeDiagnostic.complete")}
++          </Text>
++          <Text
++            selectable
++            style={settingsStyles.rowHint}
++            testID="native-notification-diagnostic-report"
++          >
++            {report(state.diagnostic, false)}
++          </Text>
++          <Button variant="outline" onPress={handleCopyReport} disabled={state.copy === "copying"}>
++            {t("settings.notifications.nativeDiagnostic.copy")}
++          </Button>
++          {state.diagnostic.registration.status === "success" ? (
++            <>
++              <Text style={settingsStyles.rowHint}>
++                {t("settings.notifications.nativeDiagnostic.tokenHint")}
++              </Text>
++              <Button
++                variant="outline"
++                onPress={handleCopyRegistration}
++                disabled={state.copy === "copying"}
++              >
++                {t("settings.notifications.nativeDiagnostic.copyToken")}
++              </Button>
++            </>
++          ) : null}
++          {state.copy === "copied" ? (
++            <Text style={settingsStyles.rowHint}>
++              {t("settings.notifications.nativeDiagnostic.copied")}
++            </Text>
++          ) : null}
++          {state.copy === "error" ? (
++            <Text style={settingsStyles.rowError}>
++              {t("settings.notifications.nativeDiagnostic.copyError", { error: state.copyError })}
++            </Text>
++          ) : null}
++        </>
++      ) : null}
++    </SettingsSection>
++  );
++}
 diff --git a/packages/app/src/styles/unistyles.ts b/packages/app/src/styles/unistyles.ts
 --- a/packages/app/src/styles/unistyles.ts
 +++ b/packages/app/src/styles/unistyles.ts

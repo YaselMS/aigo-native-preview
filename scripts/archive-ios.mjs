@@ -37,20 +37,19 @@ function plist(path) {
 }
 
 function checkEntitlements(directory) {
+  let checked = 0;
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     if (entry.name === "Pods" || entry.name === "build") continue;
     const path = join(directory, entry.name);
-    if (entry.isDirectory()) checkEntitlements(path);
+    if (entry.isDirectory()) checked += checkEntitlements(path);
     else if (entry.name.endsWith(".entitlements")) {
-      // Expo auto-applies the installed notifications package during prebuild.
-      // Only this unsigned preview omits remote push and its provider configuration.
-      if (plist(path)["aps-environment"] !== undefined) {
-        run("plutil", ["-remove", "aps-environment", path]);
-        console.log("Removed Expo's automatic APNs entitlement from the generated preview project.");
-      }
-      assert.equal(plist(path)["aps-environment"], undefined, `Unexpected APNs entitlement: ${path}`);
+      // Preserve the requested receiver capability. The external signer determines
+      // the final entitlement/profile; this does not configure an APNs sender.
+      assert.equal(plist(path)["aps-environment"], "production", `Missing APNs diagnostic entitlement: ${path}`);
+      checked += 1;
     }
   }
+  return checked;
 }
 
 assert.equal(run("git", ["rev-parse", "HEAD"], checkout, true), upstream);
@@ -59,7 +58,7 @@ const project = exactlyOne(ios, ".xcodeproj");
 const scheme = basename(project, ".xcodeproj");
 const listing = JSON.parse(run("xcodebuild", ["-list", "-json", "-workspace", workspace], appDirectory, true));
 assert.ok(listing.workspace?.schemes?.includes(scheme), `Generated scheme ${scheme} is missing.`);
-checkEntitlements(ios);
+assert.ok(checkEntitlements(ios) > 0, "The generated app has no notification entitlement file.");
 mkdirSync(output, { recursive: true });
 const archive = join(output, "Aigo.xcarchive");
 run("xcodebuild", [
@@ -80,8 +79,8 @@ run("xcodebuild", [
 const application = exactlyOne(join(archive, "Products", "Applications"), ".app");
 const info = plist(join(application, "Info.plist"));
 assert.equal(info.CFBundleIdentifier, "dev.aigo.preview");
-assert.equal(info.CFBundleShortVersionString, "0.7.4");
-assert.equal(info.CFBundleVersion, "7004999");
+assert.equal(info.CFBundleShortVersionString, "0.7.5");
+assert.equal(info.CFBundleVersion, "7005999");
 assert.ok(info.UISupportedInterfaceOrientations?.includes("UIInterfaceOrientationLandscapeLeft"));
 assert.ok(info.UISupportedInterfaceOrientations?.includes("UIInterfaceOrientationLandscapeRight"));
 assert.ok(info.CFBundleSupportedPlatforms?.includes("iPhoneOS"), "Expected a physical-device app.");
@@ -96,7 +95,7 @@ const ipa = join(output, "Aigo-Preview-unsigned.ipa");
 run("ditto", ["-c", "-k", "--keepParent", "Payload", basename(ipa)], output);
 writeFileSync(join(output, "build-manifest.json"), `${JSON.stringify({
   app: "Aigo Preview",
-  preview: 3,
+  preview: 4,
   bundleIdentifier: info.CFBundleIdentifier,
   upstreamCommit: upstream,
   buildKitCommit: process.env.GITHUB_SHA ?? null,
@@ -107,6 +106,8 @@ writeFileSync(join(output, "build-manifest.json"), `${JSON.stringify({
   architectures,
   signed: false,
   remotePushEnabled: false,
+  notificationDiagnostics: true,
+  requestedApnsEnvironment: "production",
   sha256: createHash("sha256").update(readFileSync(ipa)).digest("hex"),
   xcode: run("xcodebuild", ["-version"], appDirectory, true),
 }, null, 2)}\n`);

@@ -1,8 +1,8 @@
 # Aigo Preview iPhone build kit
 
-A source-only build kit for the native Paseo-derived Aigo client. Preview 3 uses version 0.7.4, build 7004999. It keeps phone navigation compact across rotation, fixes a gesture listener teardown race, and makes error details readable and copyable. The upstream chat protocol remains based on Paseo 0.7.2.
+A source-only build kit for the native Paseo-derived Aigo client. Preview 4 uses version 0.7.5, build 7005999. It adds a native notification experiment and improves pending-request responses. Preview 3's rotation and desktop fixes remain included. The upstream chat protocol remains based on Paseo 0.7.2.
 
-The first two previews were signed and installed on an iPhone. Preview 2 demonstrated embedded and fullscreen desktop viewing, but rotation in either direction crashed in both presentations. Preview 3 addresses that report. Its native build and independent IPA verification passed; physical iPhone acceptance remains pending. [Download Preview 3](https://github.com/YaselMS/aigo-native-preview/releases/tag/v0.1.0-preview.3).
+Preview 3 received positive physical-iPhone feedback for most features tested by the user. [Download Preview 3](https://github.com/YaselMS/aigo-native-preview/releases/tag/v0.1.0-preview.3). Preview 4 is being prepared; its native build and device acceptance are not yet complete.
 
 ## Build and install
 
@@ -10,10 +10,10 @@ Run **Build unsigned Aigo Preview for iPhone** manually in GitHub Actions. It ap
 
 Download the IPA from a verified preview release and sign/install it using your existing signing arrangement. The bundle ID stays `dev.aigo.preview`. Pairing and viewer access are supplied at runtime; no private host URL or credential is bundled.
 
-The `aigo-native-desktop` folder is the host plugin. A separately running Windows viewer/coordinator is required; this repository does not yet package the complete host installer. Fullscreen recreates the WebView and reconnects in viewing mode. Taking control again is explicit. Native push remains disabled for this independent preview bundle.
+The `aigo-native-desktop` folder is the host plugin. A separately running Windows viewer/coordinator is required; this repository does not yet package the complete host installer. Fullscreen recreates the WebView and reconnects in viewing mode. Taking control again is explicit. Preview 4 preserves a requested APNs entitlement and adds user-triggered permission/local-notification/device-registration diagnostics. Automatic Expo/Paseo push registration remains disabled, and remote delivery is unverified. See [Preview 4 notes](RELEASE-NOTES-4.md).
 
 ## Validation and publication
 
-Local candidate checks cover the gesture teardown regression, phone/tablet/web viewport decisions, stable phone-shell mounting through rotation, error-copy pending/success/failure states, preview configuration, and patch application to the pinned upstream source. The existing app type/lint and native lifecycle checks remain in CI, alongside the new regressions. The app/plugin type checks, repository lint, and 39 focused app tests pass locally. The macOS native build and independent IPA verification also pass; physical iPhone acceptance remains pending. The native build independently checks IPA identity, landscape orientations, arm64 executable and bundled JavaScript. None of these checks substitutes for physical iPhone testing.
+CI checks app/plugin types, repository lint, focused regressions, preview configuration, and patch application to the pinned upstream source. The native build checks IPA identity, landscape orientations, arm64 executable and bundled JavaScript. Notification diagnostics distinguish local scheduling, APNs registration, and remote delivery. None of these checks substitutes for physical iPhone testing.
 
 Builds and release publication are manually triggered. Only reviewed source in this directory and verified unsigned IPA/manifest assets are public. Never upload the enclosing Aigo directory, runtime/session files, screenshots, chats, pairing material or signing keys. The historical preview-1 publication workflow remains pinned to its original exact artifact.
