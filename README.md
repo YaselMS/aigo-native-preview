@@ -2,7 +2,7 @@
 
 A source-only build kit for the native Paseo-derived Aigo client. Preview 4 uses version 0.7.5, build 7005999. It adds a native notification experiment and improves pending-request responses. Preview 3's rotation and desktop fixes remain included. The upstream chat protocol remains based on Paseo 0.7.2.
 
-Preview 3 received positive physical-iPhone feedback for most features tested by the user. [Download Preview 3](https://github.com/YaselMS/aigo-native-preview/releases/tag/v0.1.0-preview.3). Preview 4 is being prepared; its native build and device acceptance are not yet complete.
+Preview 3 received positive physical-iPhone feedback for most features tested by the user. Preview 4's native build and independent IPA verification passed; its physical-device notification results are pending. [Download Preview 4](https://github.com/YaselMS/aigo-native-preview/releases/download/v0.1.0-preview.4/Aigo-Preview-unsigned.ipa).
 
 ## Build and install
 
