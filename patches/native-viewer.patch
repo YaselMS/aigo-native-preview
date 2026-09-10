@@ -29,7 +29,7 @@ diff --git a/packages/app/app.config.js b/packages/app/app.config.js
 +const variant = isAigoPreview
 +  ? { name: "Aigo Preview", packageId: "dev.aigo.preview" }
 +  : (variants[appVariant] ?? variants.production);
-+const nativeReleaseVersion = getNativeReleaseVersion(isAigoPreview ? "0.7.5" : pkg.version);
++const nativeReleaseVersion = getNativeReleaseVersion(isAigoPreview ? "0.7.6" : pkg.version);
  
  export default {
    expo: {
@@ -62,7 +62,7 @@ diff --git a/packages/app/app.config.js b/packages/app/app.config.js
        profileBuild: isProfileBuild,
 +      aigoNativePreview: isAigoPreview,
 +      ...(isAigoPreview
-+        ? { aigoPreviewLabel: "Aigo Preview 4", aigoNotificationDiagnostics: true }
++        ? { aigoPreviewLabel: "Aigo Preview 5", aigoNotificationDiagnostics: true }
 +        : {}),
        router: {},
 -      eas: {
@@ -2723,6 +2723,35 @@ diff --git a/packages/plugin/src/react-native.ts b/packages/plugin/src/react-nat
  export declare function useToast(): ToastApi;
  
  export type { PluginIconProps } from "./contracts.js";
+diff --git a/patches/expo-notifications+0.32.16.patch b/patches/expo-notifications+0.32.16.patch
+new file mode 100644
+--- /dev/null
++++ b/patches/expo-notifications+0.32.16.patch
+@@ -0,0 +1,24 @@
++diff --git a/node_modules/expo-notifications/src/DevicePushTokenAutoRegistration.fx.ts b/node_modules/expo-notifications/src/DevicePushTokenAutoRegistration.fx.ts
++--- a/node_modules/expo-notifications/src/DevicePushTokenAutoRegistration.fx.ts
+++++ b/node_modules/expo-notifications/src/DevicePushTokenAutoRegistration.fx.ts
++@@ -39,7 +39,7 @@
++   }
++ 
++   await ServerRegistrationModule.setRegistrationInfoAsync(
++-    enabled ? JSON.stringify({ isEnabled: enabled }) : null
+++    JSON.stringify({ isEnabled: enabled })
++   );
++ }
++ 
++diff --git a/node_modules/expo-notifications/build/DevicePushTokenAutoRegistration.fx.js b/node_modules/expo-notifications/build/DevicePushTokenAutoRegistration.fx.js
++--- a/node_modules/expo-notifications/build/DevicePushTokenAutoRegistration.fx.js
+++++ b/node_modules/expo-notifications/build/DevicePushTokenAutoRegistration.fx.js
++@@ -25,7 +25,7 @@
++     if (!ServerRegistrationModule.setRegistrationInfoAsync) {
++         throw new UnavailabilityError('ServerRegistrationModule', 'setRegistrationInfoAsync');
++     }
++-    await ServerRegistrationModule.setRegistrationInfoAsync(enabled ? JSON.stringify({ isEnabled: enabled }) : null);
+++    await ServerRegistrationModule.setRegistrationInfoAsync(JSON.stringify({ isEnabled: enabled }));
++ }
++ // note(Chmiela): This function is exported only for testing purposes.
++ export async function __handlePersistedRegistrationInfoAsync(registrationInfo) {
 diff --git a/patches/react-native-gesture-handler+2.28.0.patch b/patches/react-native-gesture-handler+2.28.0.patch
 --- a/patches/react-native-gesture-handler+2.28.0.patch
 +++ b/patches/react-native-gesture-handler+2.28.0.patch
@@ -2766,3 +2795,17 @@ diff --git a/patches/react-native-gesture-handler+2.28.0.patch b/patches/react-n
 +       // At this point the ref in the gesture config should be updated, so we can check if one of the gestures
 +       // set in a relation with the gesture got mounted. If so, we need to update the detector to propagate
 +       // the changes to the native side.
+diff --git a/scripts/postinstall-patches.mjs b/scripts/postinstall-patches.mjs
+--- a/scripts/postinstall-patches.mjs
++++ b/scripts/postinstall-patches.mjs
+@@ -8,6 +8,10 @@
+ // workspace root live in their workspace's own node_modules, and patch-package resolves
+ // the patch's node_modules/... paths relative to its working directory.
+ const patchedPackages = [
++  {
++    nodeModulesPath: "node_modules/expo-notifications",
++    patchPrefix: "expo-notifications+",
++  },
+   {
+     nodeModulesPath: "node_modules/react-native-markdown-display",
+     patchPrefix: "react-native-markdown-display+",

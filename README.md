@@ -1,8 +1,8 @@
 # Aigo Preview iPhone build kit
 
-A source-only build kit for the native Paseo-derived Aigo client. Preview 4 uses version 0.7.5, build 7005999. It adds a native notification experiment and improves pending-request responses. Preview 3's rotation and desktop fixes remain included. The upstream chat protocol remains based on Paseo 0.7.2.
+A source-only build kit for the native Paseo-derived Aigo client. Preview 5 uses version 0.7.6, build 7006999. It fixes native notification registration preparation and preserves Preview 4's pending-request improvements. Preview 3's rotation and desktop fixes remain included. The upstream chat protocol remains based on Paseo 0.7.2.
 
-Preview 3 received positive physical-iPhone feedback for most features tested by the user. Preview 4's native build and independent IPA verification passed; its physical-device notification results are pending. [Download Preview 4](https://github.com/YaselMS/aigo-native-preview/releases/download/v0.1.0-preview.4/Aigo-Preview-unsigned.ipa).
+Preview 3 received positive physical-iPhone feedback for most features tested. Preview 4 visibly delivered local notifications on the locked iPhone, but its registration preparation failed before requesting an Apple device token. Preview 5's build and physical-device registration results are pending. See [Preview 5 notes](RELEASE-NOTES-5.md).
 
 ## Build and install
 

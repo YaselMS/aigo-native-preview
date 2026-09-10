@@ -1,0 +1,71 @@
+name: Publish verified iPhone preview 5
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run:
+        description: Reviewed successful build run ID
+        required: true
+      build_commit:
+        description: Exact source commit from the reviewed manifest
+        required: true
+      sha256:
+        description: Independently verified IPA SHA-256
+        required: true
+
+permissions: {}
+concurrency:
+  group: publish-preview-5
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN: ${{ inputs.build_run }}
+      BUILD_COMMIT: ${{ inputs.build_commit }}
+      IPA_SHA256: ${{ inputs.sha256 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Validate reviewed identifiers
+        shell: python
+        run: |
+          import os, re
+          assert re.fullmatch(r'[0-9]+', os.environ['BUILD_RUN'])
+          assert re.fullmatch(r'[0-9a-f]{40}', os.environ['BUILD_COMMIT'])
+          assert re.fullmatch(r'[0-9a-f]{64}', os.environ['IPA_SHA256'])
+      - name: Download the reviewed build
+        run: |
+          gh run view "$BUILD_RUN" --json conclusion,headSha > run.json
+          gh run download "$BUILD_RUN" --name aigo-preview-unsigned-iphone --dir artifact
+      - name: Verify artifact and source identity
+        shell: python
+        run: |
+          import hashlib, json, os, pathlib
+          run = json.loads(pathlib.Path('run.json').read_text())
+          assert run['conclusion'] == 'success'
+          assert run['headSha'] == os.environ['BUILD_COMMIT']
+          root = pathlib.Path('artifact')
+          manifest = json.loads((root / 'build-manifest.json').read_text())
+          assert manifest['buildKitCommit'] == os.environ['BUILD_COMMIT']
+          assert manifest['bundleIdentifier'] == 'dev.aigo.preview'
+          assert manifest['preview'] == 5
+          assert manifest['upstreamCommit'] == '9400a49af670fdb5db4af58e73f8df98588dbea9'
+          assert manifest['version'] == '0.7.6' and manifest['buildNumber'] == '7006999'
+          assert manifest['signed'] is False and manifest['remotePushEnabled'] is False
+          assert manifest['notificationDiagnostics'] is True
+          assert manifest['requestedApnsEnvironment'] == 'production'
+          assert manifest['sha256'] == os.environ['IPA_SHA256']
+          assert hashlib.sha256((root / 'Aigo-Preview-unsigned.ipa').read_bytes()).hexdigest() == os.environ['IPA_SHA256']
+      - name: Publish the unsigned preview download
+        run: |
+          gh release create v0.1.0-preview.5 artifact/Aigo-Preview-unsigned.ipa artifact/build-manifest.json --target "$BUILD_COMMIT" --title 'Aigo Preview 5 — notification registration correction' --notes-file RELEASE-NOTES-5.md --prerelease

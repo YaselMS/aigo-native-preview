@@ -66,6 +66,7 @@ jobs:
 
       - name: Check viewer navigation and plugin behavior
         run: |
+          node scripts/verify-notification-registration.cjs paseo
           node scripts/verify-gesture-lifecycle.cjs paseo
           cd paseo/packages/app
           npm run test -- --project unit src/plugins/react-native/desktop-view-policy.test.ts src/plugins/react-native/desktop-view.native.test.tsx src/constants/layout-breakpoints.test.ts src/components/root-error-boundary.test.tsx --bail=1
