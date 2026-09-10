@@ -51,7 +51,10 @@ jobs:
       - name: Install pinned dependencies
         working-directory: paseo
         # Upstream postinstall patches dependencies in node_modules; it must not edit tracked source.
-        run: npm ci
+        run: |
+          npm ci
+          git diff --exit-code
+          git diff --cached --exit-code
 
       - name: Build app dependencies and terminal assets
         working-directory: paseo
@@ -68,11 +71,12 @@ jobs:
       - name: Verify the production control and unchanged tracked source
         working-directory: paseo/packages/app
         run: |
-          git diff --exit-code
+          # The upstream terminal build regenerates this tracked output file.
+          git -C ../.. diff --exit-code -- . ':(exclude)packages/app/src/terminal/webview/terminal-emulator-webview-html.ts'
           git diff --cached --exit-code
           npx expo config --type prebuild --json > "$RUNNER_TEMP/paseo-control-expo-config.json"
           node ../../../scripts/verify-paseo-control-config.mjs "$RUNNER_TEMP/paseo-control-expo-config.json"
-          git diff --exit-code
+          git -C ../.. diff --exit-code -- . ':(exclude)packages/app/src/terminal/webview/terminal-emulator-webview-html.ts'
           git diff --cached --exit-code
 
       - name: Generate the upstream iOS project and install CocoaPods
