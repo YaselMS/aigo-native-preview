@@ -2,7 +2,7 @@
 
 A source-only build kit for the native Paseo-derived Aigo client. Preview 6 targets version 0.7.7, build 7007999, with subagent attention and history recovery fixes. Earlier native desktop, rotation and request-response fixes remain included. The upstream chat protocol remains based on Paseo 0.7.2.
 
-Preview 5 has physical-device confirmation of local notifications and Apple device-token registration. Version-one remote alerts use ntfy; the locked-phone alert, exact conversation, response and agent continuation loop passed. Native Aigo remote push remains out of this release. Preview 6 is being validated; see [install and test notes](RELEASE-NOTES-6.md).
+Preview 5 has physical-device confirmation of local notifications and Apple device-token registration. Version-one remote alerts use ntfy; the locked-phone alert, exact conversation, response and agent continuation loop passed. Native Aigo remote push remains out of this release. Preview 6 passed CI and independent verification of both the build artifact and published IPA checksum. [Download Preview 6](https://github.com/YaselMS/aigo-native-preview/releases/download/v0.1.0-preview.6/Aigo-Preview-unsigned.ipa) · [Install and test notes](RELEASE-NOTES-6.md). Physical-device update acceptance remains pending.
 
 ## Build and install
 
