@@ -4,7 +4,7 @@ Published with explicit user approval: `YaselMS/aigo-native-preview`.
 
 Only the contents of this build-kit directory are published:
 
-- `patches/native-viewer.patch`: eight changed/new Paseo files implementing the native viewer, navigation checks/tests, preview identity, and preview-only push-registration gate.
+- `patches/native-viewer.patch`: reviewed client/dependency changes against pinned upstream, including the native viewer, navigation/rotation repairs, notification diagnostics, pending requests, and subagent status/history checks.
 - `aigo-native-desktop/`: plugin implementation, synthetic tests, package/typecheck configuration, and instructions. No installed dependencies.
 - `.github/workflows/ios-preview.yml`: manually triggered macOS build; skips private repositories; no signing or publishing credentials.
 - `scripts/`: identity validator and unsigned physical-device IPA packaging script.
@@ -23,3 +23,5 @@ First phone acceptance test:
 5. Leave the viewer and background the app while holding control. Confirm host ownership expires/releases and reconnect never restores control automatically.
 
 Notifications and final viewer layout are not acceptance criteria for this first build. They remain product work. Windows source checks and an iOS JavaScript bundle are not evidence of a successful native archive or device run.
+
+Preview 6 source review: the added subagent paths contain only app code and synthetic tests. No host addresses, pairing records, notification topic, credentials or live conversation IDs are included. CI now runs the subagent selector/archive/presentation and history request/panel regressions. Identity validators require 0.7.7/build7007999. The gesture verification script normalizes Windows line endings before checking its guard.

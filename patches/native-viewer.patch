@@ -29,7 +29,7 @@ diff --git a/packages/app/app.config.js b/packages/app/app.config.js
 +const variant = isAigoPreview
 +  ? { name: "Aigo Preview", packageId: "dev.aigo.preview" }
 +  : (variants[appVariant] ?? variants.production);
-+const nativeReleaseVersion = getNativeReleaseVersion(isAigoPreview ? "0.7.6" : pkg.version);
++const nativeReleaseVersion = getNativeReleaseVersion(isAigoPreview ? "0.7.7" : pkg.version);
  
  export default {
    expo: {
@@ -62,7 +62,7 @@ diff --git a/packages/app/app.config.js b/packages/app/app.config.js
        profileBuild: isProfileBuild,
 +      aigoNativePreview: isAigoPreview,
 +      ...(isAigoPreview
-+        ? { aigoPreviewLabel: "Aigo Preview 5", aigoNotificationDiagnostics: true }
++        ? { aigoPreviewLabel: "Aigo Preview 6", aigoNotificationDiagnostics: true }
 +        : {}),
        router: {},
 -      eas: {
@@ -1487,6 +1487,568 @@ diff --git a/packages/app/src/i18n/resources/zh-CN.ts b/packages/app/src/i18n/re
        title: "通知",
        permission: "通知权限",
        refreshAccessibility: "刷新通知权限",
+diff --git a/packages/app/src/panels/provider-subagent-history.test.ts b/packages/app/src/panels/provider-subagent-history.test.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/app/src/panels/provider-subagent-history.test.ts
+@@ -0,0 +1,89 @@
++import { describe, expect, it } from "vitest";
++import { createProviderHistoryRequests } from "./provider-subagent-history";
++
++function deferred<T>() {
++  let resolve!: (value: T) => void;
++  let reject!: (error: Error) => void;
++  const promise = new Promise<T>((res, rej) => {
++    resolve = res;
++    reject = rej;
++  });
++  return { promise, resolve, reject };
++}
++
++describe("provider child history requests", () => {
++  it.each(["initial", "older"] as const)(
++    "preserves cached history after %s failure and permits retry",
++    async (kind) => {
++      const gate = createProviderHistoryRequests();
++      gate.activate();
++      let cached = "cached transcript";
++      await gate.run(
++        kind,
++        async () => {
++          throw new Error("disconnected");
++        },
++        (value: string) => {
++          cached = value;
++        },
++      );
++      expect(gate.getSnapshot()[kind]).toBe("error");
++      expect(cached).toBe("cached transcript");
++      const retry = deferred<string>();
++      const operation = gate.run(
++        kind,
++        () => retry.promise,
++        (value) => {
++          cached = value;
++        },
++      );
++      expect(gate.getSnapshot()[kind]).toBe("loading");
++      retry.resolve("recovered transcript");
++      await operation;
++      expect(gate.getSnapshot()[kind]).toBe("ready");
++      expect(cached).toBe("recovered transcript");
++    },
++  );
++
++  it("ignores completion after target disposal, including effect reactivation", async () => {
++    const gate = createProviderHistoryRequests();
++    gate.activate();
++    const old = deferred<string>();
++    const applied: string[] = [];
++    const first = gate.run(
++      "initial",
++      () => old.promise,
++      (value) => applied.push(value),
++    );
++    gate.dispose();
++    gate.activate();
++    await gate.run(
++      "initial",
++      async () => "new",
++      (value) => applied.push(value),
++    );
++    old.resolve("stale");
++    await first;
++    expect(applied).toEqual(["new"]);
++    expect(gate.getSnapshot().initial).toBe("ready");
++  });
++
++  it("does not issue duplicate requests or surface errors from a disposed target", async () => {
++    const gate = createProviderHistoryRequests();
++    gate.activate();
++    const pending = deferred<string>();
++    let calls = 0;
++    const request = () => {
++      calls++;
++      return pending.promise;
++    };
++    const first = gate.run("older", request, () => {});
++    await gate.run("older", request, () => {});
++    expect(calls).toBe(1);
++    gate.dispose();
++    gate.activate();
++    pending.reject(new Error("old connection"));
++    await first;
++    expect(gate.getSnapshot().older).toBe("idle");
++  });
++});
+diff --git a/packages/app/src/panels/provider-subagent-history.ts b/packages/app/src/panels/provider-subagent-history.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/app/src/panels/provider-subagent-history.ts
+@@ -0,0 +1,50 @@
++export type HistoryRequestPhase = "idle" | "loading" | "ready" | "error";
++export type HistoryRequestKind = "initial" | "older";
++
++/** Each panel target owns a gate; disposed requests cannot update its replacement or cache. */
++export function createProviderHistoryRequests() {
++  let generation = 0;
++  let active = false;
++  let state: Record<HistoryRequestKind, HistoryRequestPhase> = { initial: "idle", older: "idle" };
++  const listeners = new Set<() => void>();
++  const update = (kind: HistoryRequestKind, phase: HistoryRequestPhase) => {
++    state = { ...state, [kind]: phase };
++    for (const listener of listeners) listener();
++  };
++  return {
++    getSnapshot: () => state,
++    subscribe: (listener: () => void) => {
++      listeners.add(listener);
++      return () => {
++        listeners.delete(listener);
++      };
++    },
++    activate: () => {
++      active = true;
++      generation++;
++      state = { initial: "idle", older: "idle" };
++      for (const listener of listeners) listener();
++    },
++    dispose: () => {
++      active = false;
++      generation++;
++    },
++    async run<T>(
++      kind: HistoryRequestKind,
++      request: () => Promise<T>,
++      apply: (value: T) => void,
++    ): Promise<void> {
++      if (!active || state[kind] === "loading") return;
++      const current = generation;
++      update(kind, "loading");
++      try {
++        const value = await request();
++        if (!active || current !== generation) return;
++        apply(value);
++        update(kind, "ready");
++      } catch {
++        if (active && current === generation) update(kind, "error");
++      }
++    },
++  };
++}
+diff --git a/packages/app/src/panels/provider-subagent-panel.test.tsx b/packages/app/src/panels/provider-subagent-panel.test.tsx
+new file mode 100644
+--- /dev/null
++++ b/packages/app/src/panels/provider-subagent-panel.test.tsx
+@@ -0,0 +1,142 @@
++/** @vitest-environment jsdom */
++import React from "react";
++import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { providerSubagentPanelRegistration } from "./provider-subagent-panel";
++
++const runtime = vi.hoisted(() => ({
++  connected: true,
++  child: "child",
++  fetch: vi.fn(),
++  list: vi.fn(),
++  replace: vi.fn(),
++}));
++vi.mock("@/runtime/host-runtime", () => ({ useHostRuntimeIsConnected: () => runtime.connected }));
++vi.mock("@/panels/pane-context", () => ({
++  usePaneContext: () => ({
++    serverId: "host",
++    target: { kind: "provider_subagent", parentAgentId: "parent", subagentId: runtime.child },
++    openFileInWorkspace: vi.fn(),
++  }),
++}));
++vi.mock("@/panels/panel-registry", () => ({
++  definePanel: (_kind: string, registration: unknown) => registration,
++}));
++vi.mock("@/components/provider-icons", () => ({ getProviderIcon: () => null }));
++vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
++vi.mock("react-native-unistyles", () => ({ StyleSheet: { create: () => ({}) } }));
++vi.mock("@/components/ui/button", () => ({
++  Button: ({
++    children,
++    onPress,
++    disabled,
++  }: {
++    children: React.ReactNode;
++    onPress: () => void;
++    disabled?: boolean;
++  }) => (
++    <button type="button" disabled={disabled} onClick={onPress}>
++      {children}
++    </button>
++  ),
++}));
++vi.mock("@/agent-stream/view", () => ({
++  AgentStreamView: ({
++    streamItems,
++    historyPagination,
++  }: {
++    streamItems: Array<{ text: string }>;
++    historyPagination: { onLoadOlder: () => void };
++  }) => (
++    <div>
++      {streamItems.map((item) => item.text).join("")}
++      <button type="button" onClick={historyPagination.onLoadOlder}>
++        Older
++      </button>
++    </div>
++  ),
++}));
++vi.mock("@/stores/session-store", () => {
++  const state = {
++    sessions: {
++      host: {
++        agents: new Map(),
++        agentDetails: new Map(),
++        client: {
++          fetchProviderSubagentTimeline: runtime.fetch,
++          listProviderSubagents: runtime.list,
++        },
++        serverInfo: { features: { providerSubagents: true } },
++      },
++    },
++  };
++  return { useSessionStore: (select: (snapshot: typeof state) => unknown) => select(state) };
++});
++vi.mock("@/subagents/provider-store", () => {
++  const state = {
++    descriptors: new Map(),
++    timelines: new Map([
++      [
++        "child",
++        {
++          tail: [{ text: "Cached transcript" }],
++          head: [],
++          epoch: "epoch",
++          rows: new Map([[10, {}]]),
++          hasOlder: true,
++        },
++      ],
++    ]),
++    replaceList: vi.fn(),
++    replaceTimeline: (...args: unknown[]) => runtime.replace(...args),
++  };
++  return {
++    providerSubagentKey: (_host: string, _parent: string, child: string) => child,
++    providerSubagentLifecycleStatus: () => "idle",
++    useProviderSubagentStore: Object.assign(
++      (select: (value: typeof state) => unknown) => select(state),
++      { getState: () => state },
++    ),
++  };
++});
++const Panel = providerSubagentPanelRegistration.component;
++beforeEach(() => {
++  runtime.connected = true;
++  runtime.child = "child";
++  runtime.fetch.mockReset().mockResolvedValue({});
++  runtime.list.mockReset().mockResolvedValue({ subagents: [] });
++  runtime.replace.mockReset();
++});
++afterEach(cleanup);
++
++describe("provider history panel", () => {
++  it("renders initial retry, retains transcript, and recovers on tap", async () => {
++    runtime.fetch.mockRejectedValueOnce(new Error("failed"));
++    render(<Panel />);
++    await screen.findByText("agentAutocomplete.failedToLoad");
++    expect(screen.getByText("Cached transcript")).toBeDefined();
++    fireEvent.click(screen.getByRole("button", { name: "common.actions.retry" }));
++    await waitFor(() => expect(runtime.replace).toHaveBeenCalledTimes(1));
++    expect(screen.queryByText("agentAutocomplete.failedToLoad")).toBeNull();
++  });
++  it("renders older-history failure and retries without clearing the transcript", async () => {
++    render(<Panel />);
++    await waitFor(() => expect(runtime.replace).toHaveBeenCalledTimes(1));
++    runtime.fetch.mockRejectedValueOnce(new Error("older failed"));
++    fireEvent.click(screen.getByRole("button", { name: "Older" }));
++    await screen.findByText("loadOlderHistory.failed");
++    expect(screen.getByText("Cached transcript")).toBeDefined();
++    fireEvent.click(screen.getByRole("button", { name: "common.actions.retry" }));
++    await waitFor(() => expect(runtime.replace).toHaveBeenCalledTimes(2));
++    expect(screen.queryByText("loadOlderHistory.failed")).toBeNull();
++  });
++  it("does not fetch offline and reloads on reconnection", async () => {
++    runtime.connected = false;
++    const view = render(<Panel />);
++    expect(runtime.fetch).toHaveBeenCalledTimes(0);
++    expect(screen.getByText("common.errors.daemonClientDisconnected")).toBeDefined();
++    runtime.connected = true;
++    view.rerender(<Panel />);
++    await waitFor(() => expect(runtime.replace).toHaveBeenCalledTimes(1));
++  });
++});
+diff --git a/packages/app/src/panels/provider-subagent-panel.tsx b/packages/app/src/panels/provider-subagent-panel.tsx
+--- a/packages/app/src/panels/provider-subagent-panel.tsx
++++ b/packages/app/src/panels/provider-subagent-panel.tsx
+@@ -1,18 +1,23 @@
+-import { useCallback, useEffect, useMemo, useState } from "react";
++import React, { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+ import { Text, View } from "react-native";
+ import { StyleSheet } from "react-native-unistyles";
+ import invariant from "tiny-invariant";
+ import { useShallow } from "zustand/react/shallow";
+ import { AgentStreamView } from "@/agent-stream/view";
++import { Button } from "@/components/ui/button";
++import {
++  createProviderHistoryRequests,
++  type HistoryRequestPhase,
++} from "./provider-subagent-history";
+ import { getProviderIcon } from "@/components/provider-icons";
+ import type { AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
+ import { usePaneContext } from "@/panels/pane-context";
+ import { definePanel, type PanelDescriptor } from "@/panels/panel-registry";
++import { useHostRuntimeIsConnected } from "@/runtime/host-runtime";
+ import { useSessionStore } from "@/stores/session-store";
+ import {
+   providerSubagentKey,
+   providerSubagentLifecycleStatus,
+-  refreshProviderSubagents,
+   useProviderSubagentStore,
+ } from "@/subagents/provider-store";
+ import { useTranslation } from "react-i18next";
+@@ -88,56 +93,79 @@
+   const serverInfo = useSessionStore((state) => state.sessions[serverId]?.serverInfo ?? null);
+   // COMPAT(providerSubagents): added in v0.2.11, remove after 2027-01-12.
+   const supported = serverInfo?.features?.providerSubagents === true;
+-  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
++  const isConnected = useHostRuntimeIsConnected(serverId);
++  const requests = useMemo(() => createProviderHistoryRequests(), []);
++  const requestState = useSyncExternalStore(requests.subscribe, requests.getSnapshot);
++  const isLoadingOlder = requestState.older === "loading";
++  const reload = useCallback(() => {
++    if (!client || !supported || !isConnected) return;
++    void requests.run(
++      "initial",
++      () =>
++        Promise.all([
++          client.listProviderSubagents(target.parentAgentId),
++          client.fetchProviderSubagentTimeline(target.parentAgentId, target.subagentId, {
++            direction: "tail",
++            limit: TIMELINE_FETCH_PAGE_SIZE,
++          }),
++        ]),
++      ([list, payload]) => {
++        const store = useProviderSubagentStore.getState();
++        store.replaceList(serverId, target.parentAgentId, list.subagents);
++        store.replaceTimeline(serverId, payload);
++      },
++    );
++  }, [client, supported, isConnected, requests, serverId, target.parentAgentId, target.subagentId]);
+ 
+   useEffect(() => {
+-    if (!client || !supported) return;
+-    void refreshProviderSubagents(client, serverId, target.parentAgentId).catch(() => undefined);
+-  }, [client, serverId, supported, target.parentAgentId]);
+-
+-  useEffect(() => {
+-    if (!client || !supported) return;
+-    void client
+-      .fetchProviderSubagentTimeline(target.parentAgentId, target.subagentId, {
+-        direction: "tail",
+-        limit: TIMELINE_FETCH_PAGE_SIZE,
+-      })
+-      .then((payload) => {
+-        useProviderSubagentStore.getState().replaceTimeline(serverId, payload);
+-        return undefined;
+-      })
+-      .catch(() => undefined);
+-  }, [client, serverId, supported, target.parentAgentId, target.subagentId]);
+-
+-  const loadOlder = useCallback((): boolean => {
+-    if (!client || !supported || isLoadingOlder || !timeline?.hasOlder || !timeline.epoch) {
+-      return false;
+-    }
+-    const firstSeq = timeline.rows.size ? Math.min(...timeline.rows.keys()) : null;
+-    if (firstSeq === null) return false;
+-    setIsLoadingOlder(true);
+-    void client
+-      .fetchProviderSubagentTimeline(target.parentAgentId, target.subagentId, {
+-        direction: "before",
+-        cursor: { epoch: timeline.epoch, seq: firstSeq },
+-        limit: TIMELINE_FETCH_PAGE_SIZE,
+-      })
+-      .then((payload) => {
+-        useProviderSubagentStore.getState().replaceTimeline(serverId, payload);
+-        return undefined;
+-      })
+-      .catch(() => undefined)
+-      .finally(() => setIsLoadingOlder(false));
+-    return true;
+-  }, [
+-    client,
+-    isLoadingOlder,
+-    serverId,
+-    supported,
+-    target.parentAgentId,
+-    target.subagentId,
+-    timeline,
+-  ]);
++    requests.activate();
++    reload();
++    return requests.dispose;
++  }, [requests, reload]);
++
++  const loadOlder = useCallback(
++    (retry = false): boolean => {
++      if (
++        !client ||
++        !supported ||
++        !isConnected ||
++        isLoadingOlder ||
++        !timeline?.hasOlder ||
++        !timeline.epoch
++      )
++        return false;
++      if (requestState.older === "error" && !retry) return false;
++      const epoch = timeline.epoch;
++      const firstSeq = timeline.rows.size ? Math.min(...timeline.rows.keys()) : null;
++      if (firstSeq === null) return false;
++      void requests.run(
++        "older",
++        () =>
++          client.fetchProviderSubagentTimeline(target.parentAgentId, target.subagentId, {
++            direction: "before",
++            cursor: { epoch, seq: firstSeq },
++            limit: TIMELINE_FETCH_PAGE_SIZE,
++          }),
++        (payload) => useProviderSubagentStore.getState().replaceTimeline(serverId, payload),
++      );
++      return true;
++    },
++    [
++      client,
++      supported,
++      isConnected,
++      isLoadingOlder,
++      timeline,
++      requestState.older,
++      requests,
++      serverId,
++      target.parentAgentId,
++      target.subagentId,
++    ],
++  );
++  const retryOlder = useCallback(() => {
++    loadOlder(true);
++  }, [loadOlder]);
+   const firstTimelineSeq = timeline?.rows.size ? Math.min(...timeline.rows.keys()) : null;
+   const progressKey =
+     timeline?.epoch && firstTimelineSeq !== null ? `${timeline.epoch}:${firstTimelineSeq}` : null;
+@@ -160,7 +188,7 @@
+       hasOlder: timeline?.hasOlder === true,
+       isLoadingOlder,
+       progressKey,
+-      onLoadOlder: loadOlder,
++      onLoadOlder: () => loadOlder(),
+     }),
+     [isLoadingOlder, loadOlder, progressKey, timeline?.hasOlder],
+   );
+@@ -195,6 +223,14 @@
+           </Text>
+         </View>
+       ) : null}
++      <ProviderHistoryStatus
++        connected={isConnected}
++        supported={supported}
++        initial={requestState.initial}
++        older={requestState.older}
++        onRetry={reload}
++        onRetryOlder={retryOlder}
++      />
+       <AgentStreamView
+         agentId={streamId}
+         serverId={serverId}
+@@ -203,7 +239,9 @@
+         streamHead={timeline?.head ?? EMPTY_STREAM_ITEMS}
+         turnPresentation={turnPresentation}
+         pendingPermissions={EMPTY_PERMISSIONS}
+-        isAuthoritativeHistoryReady
++        isAuthoritativeHistoryReady={
++          timeline !== null || ["ready", "error"].includes(requestState.initial)
++        }
+         onOpenWorkspaceFile={openFileInWorkspace}
+         readOnly
+         historyPagination={historyPagination}
+@@ -212,8 +250,73 @@
+   );
+ }
+ 
++function ProviderHistoryStatus({
++  connected,
++  supported,
++  initial,
++  older,
++  onRetry,
++  onRetryOlder,
++}: {
++  connected: boolean;
++  supported: boolean;
++  initial: HistoryRequestPhase;
++  older: HistoryRequestPhase;
++  onRetry: () => void;
++  onRetryOlder: () => void;
++}) {
++  const { t } = useTranslation();
++  return (
++    <>
++      {!connected ? (
++        <View style={styles.loadStatus} testID="provider-subagent-disconnected">
++          <Text style={styles.subtitleText}>{t("common.errors.daemonClientDisconnected")}</Text>
++        </View>
++      ) : null}
++      {connected && initial !== "ready" ? (
++        <View style={styles.loadStatus} testID="provider-subagent-history-status">
++          <Text
++            style={styles.subtitleText}
++            accessibilityRole={initial === "error" ? "alert" : undefined}
++          >
++            {initial === "error" ? t("agentAutocomplete.failedToLoad") : t("common.states.loading")}
++          </Text>
++          {initial === "error" ? (
++            <Button
++              size="sm"
++              variant="secondary"
++              onPress={onRetry}
++              disabled={!supported}
++              testID="provider-subagent-history-retry"
++            >
++              {t("common.actions.retry")}
++            </Button>
++          ) : null}
++        </View>
++      ) : null}
++      {older === "error" ? (
++        <View style={styles.loadStatus} testID="provider-subagent-older-error">
++          <Text style={styles.subtitleText} accessibilityRole="alert">
++            {t("loadOlderHistory.failed")}
++          </Text>
++          <Button
++            size="sm"
++            variant="secondary"
++            disabled={!connected || !supported}
++            onPress={onRetryOlder}
++            testID="provider-subagent-older-retry"
++          >
++            {t("common.actions.retry")}
++          </Button>
++        </View>
++      ) : null}
++    </>
++  );
++}
++
+ const styles = StyleSheet.create((theme) => ({
+   container: { flex: 1, minHeight: 0 },
++  loadStatus: { padding: theme.spacing[3], gap: theme.spacing[2], alignItems: "flex-start" },
+   subtitleHeader: {
+     paddingHorizontal: theme.spacing[3],
+     paddingVertical: theme.spacing[1],
 diff --git a/packages/app/src/plugins/react-native/desktop-view-policy.test.ts b/packages/app/src/plugins/react-native/desktop-view-policy.test.ts
 new file mode 100644
 --- /dev/null
@@ -2705,6 +3267,206 @@ diff --git a/packages/app/src/styles/unistyles.ts b/packages/app/src/styles/unis
    settings: {
      adaptiveThemes: true,
    },
+diff --git a/packages/app/src/subagents/archive-finished.test.ts b/packages/app/src/subagents/archive-finished.test.ts
+--- a/packages/app/src/subagents/archive-finished.test.ts
++++ b/packages/app/src/subagents/archive-finished.test.ts
+@@ -12,6 +12,8 @@
+     subtitle: null,
+     status,
+     requiresAttention: false,
++    pendingPermissionCount: 0,
++    attentionReason: null,
+     createdAt: new Date(),
+   };
+ }
+@@ -44,6 +46,8 @@
+     status,
+     parentAgentId: "parent",
+     archivedAt: null,
++    pendingPermissions: [],
++    attentionReason: null,
+     ...overrides,
+   };
+ }
+@@ -59,6 +63,28 @@
+ }
+ 
+ describe("createArchiveFinishedSubagents", () => {
++  it("keeps children awaiting input out of finished archives and rechecks live state", async () => {
++    const archived: string[] = [];
++    const waiting = { ...paseo("waiting"), pendingPermissionCount: 1 };
++    const checkpoint = { ...paseo("checkpoint"), attentionReason: "permission" as const };
++    const archive = createArchiveFinishedSubagents(
++      [waiting, checkpoint, paseo("changed"), paseo("done")],
++      {
++        parentAgentId: "parent",
++        getManagedSubagent: (id) =>
++          managed(id, "idle", { attentionReason: id === "changed" ? "permission" : null }),
++        archiveManagedSubagent: async (id) => {
++          archived.push(id);
++        },
++        dismissProviderSubagents: () => {},
++      },
++    );
++    expect(archive.getState().eligibleCount).toBe(2);
++    const result = await archive.archiveFinished();
++    expect(archived).toEqual(["done"]);
++    expect(result.skippedPaseoIds).toEqual(["changed"]);
++  });
++
+   it("dismisses provider rows before sequential managed archives and reports combined progress", async () => {
+     const first = deferred<void>();
+     const second = deferred<void>();
+diff --git a/packages/app/src/subagents/archive-finished.ts b/packages/app/src/subagents/archive-finished.ts
+--- a/packages/app/src/subagents/archive-finished.ts
++++ b/packages/app/src/subagents/archive-finished.ts
+@@ -18,7 +18,10 @@
+   failures: Array<{ id: string; error: unknown }>;
+ }
+ 
+-export type ManagedSubagentSnapshot = Pick<Agent, "id" | "status" | "parentAgentId" | "archivedAt">;
++export type ManagedSubagentSnapshot = Pick<
++  Agent,
++  "id" | "status" | "parentAgentId" | "archivedAt" | "pendingPermissions" | "attentionReason"
++>;
+ 
+ export interface ArchiveFinishedSubagentsDeps {
+   parentAgentId: string;
+@@ -35,7 +38,10 @@
+ }
+ 
+ export function isFinishedSubagent(row: SubagentRow): boolean {
+-  if (row.kind === "paseo") return row.status === "idle" || row.status === "error";
++  if (row.kind === "paseo") {
++    const awaitingInput = row.pendingPermissionCount > 0 || row.attentionReason === "permission";
++    return !awaitingInput && (row.status === "idle" || row.status === "error");
++  }
+   return row.status === "completed" || row.status === "failed" || row.status === "canceled";
+ }
+ 
+@@ -47,6 +53,8 @@
+     agent &&
+     !agent.archivedAt &&
+     agent.parentAgentId === parentAgentId &&
++    agent.pendingPermissions.length === 0 &&
++    agent.attentionReason !== "permission" &&
+     (agent.status === "idle" || agent.status === "error"),
+   );
+ }
+diff --git a/packages/app/src/subagents/select.test.ts b/packages/app/src/subagents/select.test.ts
+--- a/packages/app/src/subagents/select.test.ts
++++ b/packages/app/src/subagents/select.test.ts
+@@ -244,6 +244,7 @@
+         title: "Review child",
+         status: "running",
+         requiresAttention: true,
++        attentionReason: "permission",
+         createdAt,
+         model: "should-not-leak",
+         cwd: "/private/project",
+@@ -269,14 +270,18 @@
+         subtitle: null,
+         status: "running",
+         requiresAttention: true,
++        pendingPermissionCount: 0,
++        attentionReason: "permission",
+         createdAt,
+       },
+     ]);
+     expect(Object.keys(rows[0] ?? {}).sort()).toEqual([
++      "attentionReason",
+       "createdAt",
+       "description",
+       "id",
+       "kind",
++      "pendingPermissionCount",
+       "provider",
+       "requiresAttention",
+       "status",
+diff --git a/packages/app/src/subagents/select.ts b/packages/app/src/subagents/select.ts
+--- a/packages/app/src/subagents/select.ts
++++ b/packages/app/src/subagents/select.ts
+@@ -16,6 +16,8 @@
+   subtitle: null;
+   status: Agent["status"];
+   requiresAttention: Agent["requiresAttention"];
++  pendingPermissionCount: number;
++  attentionReason: Agent["attentionReason"];
+   createdAt: Agent["createdAt"];
+ }
+ 
+@@ -59,6 +61,8 @@
+     subtitle: null,
+     status: agent.status,
+     requiresAttention: agent.requiresAttention,
++    pendingPermissionCount: agent.pendingPermissions.length,
++    attentionReason: agent.attentionReason,
+     createdAt: agent.createdAt,
+   };
+ }
+diff --git a/packages/app/src/subagents/track-presentation.test.ts b/packages/app/src/subagents/track-presentation.test.ts
+--- a/packages/app/src/subagents/track-presentation.test.ts
++++ b/packages/app/src/subagents/track-presentation.test.ts
+@@ -20,6 +20,8 @@
+     subtitle: null,
+     status: overrides.status ?? "idle",
+     requiresAttention: overrides.requiresAttention ?? false,
++    pendingPermissionCount: overrides.pendingPermissionCount ?? 0,
++    attentionReason: overrides.attentionReason ?? null,
+     createdAt: overrides.createdAt ?? new Date("2026-04-20T00:00:00.000Z"),
+   };
+ }
+@@ -193,10 +195,23 @@
+     );
+   });
+ 
+-  it("ignores requiresAttention on the source row when computing the bucket", () => {
+-    expect(
+-      buildSubagentRowPresentationData(row({ id: "a", status: "idle", requiresAttention: true }))
++  it("shows pending input even while the child remains running", () => {
++    expect(
++      buildSubagentRowPresentationData(
++        row({ id: "a", status: "running", pendingPermissionCount: 1 }),
++      ).statusBucket,
++    ).toBe("needs_input");
++    expect(
++      buildSubagentRowPresentationData(row({ id: "b", attentionReason: "permission" }))
+         .statusBucket,
++    ).toBe("needs_input");
++  });
++
++  it("keeps completed-child attention quiet", () => {
++    expect(
++      buildSubagentRowPresentationData(
++        row({ id: "a", requiresAttention: true, attentionReason: "finished" }),
++      ).statusBucket,
+     ).toBe("done");
+   });
+ });
+diff --git a/packages/app/src/subagents/track-presentation.ts b/packages/app/src/subagents/track-presentation.ts
+--- a/packages/app/src/subagents/track-presentation.ts
++++ b/packages/app/src/subagents/track-presentation.ts
+@@ -38,6 +38,8 @@
+     statusBucket: deriveSidebarStateBucket({
+       status,
+       requiresAttention: false,
++      pendingPermissionCount: row.kind === "paseo" ? row.pendingPermissionCount : 0,
++      attentionReason: row.kind === "paseo" ? row.attentionReason : null,
+     }),
+   };
+ }
+@@ -69,9 +71,8 @@
+  * "1 failed" over a child that is still working says the fan-out has stopped. Every state present
+  * gets its own mark and its own count, in the order the sidebar's status groups list them.
+  *
+- * It stays one line because subagent rows only ever reach three states — see
+- * `buildSubagentRowPresentationData`, which reports no attention of its own — so the pill is two
+- * segments at worst, and falls back to naming what it opens once nothing is happening.
++ * Pending child input remains visible here even when the parent is idle. Finished-child
++ * attention stays quiet; the parent receives the delegated result.
+  */
+ export function buildSubagentPillPresentation(
+   t: TFunction,
 diff --git a/packages/plugin/src/react-native.ts b/packages/plugin/src/react-native.ts
 --- a/packages/plugin/src/react-native.ts
 +++ b/packages/plugin/src/react-native.ts

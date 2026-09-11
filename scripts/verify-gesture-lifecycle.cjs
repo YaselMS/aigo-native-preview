@@ -18,7 +18,7 @@ global.IS_REACT_ACT_ENVIRONMENT = true;
 const { createRoot } = req('react-dom/client');
 const base = path.join(root, 'node_modules/react-native-gesture-handler/src');
 const hookFile = path.join(base, 'handlers/gestures/GestureDetector/useMountReactions.ts');
-const fixed = fs.readFileSync(hookFile, 'utf8');
+const fixed = fs.readFileSync(hookFile, 'utf8').replace(/\r\n/g, '\n');
 const guard = '      // Layout teardown precedes passive subscription cleanup.\n      if (!state.isMounted) return;\n';
 assert.ok(fixed.includes(guard), 'Installed gesture dependency is missing the reviewed guard');
 const original = fixed.replace(guard, '');
