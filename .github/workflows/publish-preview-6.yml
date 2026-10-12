@@ -76,4 +76,4 @@ jobs:
           assert hashlib.sha256((root / 'AiGo-Preview-unsigned.ipa').read_bytes()).hexdigest() == os.environ['IPA_SHA256']
       - name: Publish the unsigned preview download
         run: |
-          gh release create "$RELEASE_TAG" artifact/AiGo-Preview-unsigned.ipa artifact/build-manifest.json --target "$BUILD_COMMIT" --title 'AiGo Preview 6 (run 9) - subagent status and history recovery' --notes-file RELEASE-NOTES-6.md --prerelease
+          gh release create "$RELEASE_TAG" artifact/AiGo-Preview-unsigned.ipa artifact/build-manifest.json --target "$GITHUB_SHA" --title 'AiGo Preview 6 (run 9) - subagent status and history recovery' --notes-file RELEASE-NOTES-6.md --prerelease
