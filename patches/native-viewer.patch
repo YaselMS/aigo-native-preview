@@ -49273,6 +49273,26 @@ index 7f8137ace1d398c85148c48ca96ba66a8fc97929..0e7c7ae545b09c816f628b216c403bd3
        };
      case "inspectionFailed":
        return {
+diff --git a/packages/app/src/screens/workspace/workspace-screen.tsx b/packages/app/src/screens/workspace/workspace-screen.tsx
+index 436d4e1e0278bbc12770109de24e5dfb5c6d2647..5e908d6274feb75367c435c21824cd97a7640cb5 100644
+--- a/packages/app/src/screens/workspace/workspace-screen.tsx
++++ b/packages/app/src/screens/workspace/workspace-screen.tsx
+@@ -2032,6 +2032,7 @@ function WorkspaceScreenContent({
+         hasActivePendingTerminalCreate:
+           createTerminalMutation.isPending || pendingTerminalCreateInput !== null,
+         hasActivePendingDraftCreate: hasActivePendingDraftCreateInWorkspace,
++        terminalSnapshotRevision: terminalsQuery.dataUpdatedAt,
+       }),
+     );
+   }, [
+@@ -2048,6 +2049,7 @@ function WorkspaceScreenContent({
+     knownTerminalIds,
+     standaloneTerminalIds,
+     terminalsQuery.isSuccess,
++    terminalsQuery.dataUpdatedAt,
+     uiTabs,
+     workspaceAgentVisibility,
+   ]);
 diff --git a/packages/app/src/stores/last-host-terminal-route.ts b/packages/app/src/stores/last-host-terminal-route.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..1d2e63a6c78a38e5684e5378901c3e52d837cc64
@@ -49345,10 +49365,18 @@ index 0000000000000000000000000000000000000000..1d2e63a6c78a38e5684e5378901c3e52
 +  return hydrated;
 +}
 diff --git a/packages/app/src/stores/workspace-layout-actions.ts b/packages/app/src/stores/workspace-layout-actions.ts
-index 9496479f4e6d70f218739c5b5922f97f6e96f83d..f2c0e6fa0477f4933d3a59cdbfd748cbfcec1637 100644
+index 9496479f4e6d70f218739c5b5922f97f6e96f83d..9f0dca122fa07711d81a46466d14bee228f2a988 100644
 --- a/packages/app/src/stores/workspace-layout-actions.ts
 +++ b/packages/app/src/stores/workspace-layout-actions.ts
-@@ -2406,6 +2406,51 @@ function seedDraftForEmptyWorkspace(input: {
+@@ -267,6 +267,7 @@ export interface WorkspaceTabSnapshot {
+   standaloneTerminalIds: Iterable<string>;
+   hasActivePendingTerminalCreate?: boolean;
+   hasActivePendingDraftCreate?: boolean;
++  terminalSnapshotRevision?: number;
+ }
+ 
+ export const DEFAULT_PANE_ID = "main";
+@@ -2406,6 +2407,51 @@ function seedDraftForEmptyWorkspace(input: {
    );
  }
  
@@ -49400,7 +49428,7 @@ index 9496479f4e6d70f218739c5b5922f97f6e96f83d..f2c0e6fa0477f4933d3a59cdbfd748cb
  export function reconcileWorkspaceTabs(
    state: WorkspaceTabReconcileState,
    snapshot: WorkspaceTabSnapshot,
-@@ -2494,6 +2539,14 @@ export function reconcileWorkspaceTabs(
+@@ -2494,6 +2540,14 @@ export function reconcileWorkspaceTabs(
      explorerSidebarPaneId: state.explorerSidebarPaneId,
    });
  
@@ -49416,7 +49444,7 @@ index 9496479f4e6d70f218739c5b5922f97f6e96f83d..f2c0e6fa0477f4933d3a59cdbfd748cb
      layout: nextLayout,
      snapshot,
 diff --git a/packages/app/src/stores/workspace-layout-store.test.ts b/packages/app/src/stores/workspace-layout-store.test.ts
-index e53f9c1911596dfa9c13785122a6e0d56bb11339..36bd78ef8fbc71468e201f17e564f7d82442fb50 100644
+index e53f9c1911596dfa9c13785122a6e0d56bb11339..c927ff3a513052406038565349418448cc4bb87d 100644
 --- a/packages/app/src/stores/workspace-layout-store.test.ts
 +++ b/packages/app/src/stores/workspace-layout-store.test.ts
 @@ -2958,6 +2958,40 @@ describe("workspace-layout-store actions", () => {
@@ -49469,7 +49497,7 @@ index e53f9c1911596dfa9c13785122a6e0d56bb11339..36bd78ef8fbc71468e201f17e564f7d8
      const workspaceKey = createWorkspaceKey();
  
      workspaceLayoutStore.getState().reconcileTabs(workspaceKey, {
-@@ -3635,6 +3669,32 @@ describe("workspace-layout-store actions", () => {
+@@ -3635,6 +3669,159 @@ describe("workspace-layout-store actions", () => {
        hasActivePendingDraftCreate: false,
      });
  
@@ -49483,6 +49511,133 @@ index e53f9c1911596dfa9c13785122a6e0d56bb11339..36bd78ef8fbc71468e201f17e564f7d8
 +    expect(findPaneById(layout.root, layout.focusedPaneId)?.focusedTabId).toBe(
 +      "terminal_term-script",
 +    );
++  });
++
++  it.each([
++    { label: "script-backed", standalone: false },
++    { label: "standalone", standalone: true },
++  ])(
++    "restores a focused $label terminal after one transient empty terminal snapshot",
++    ({ standalone }) => {
++      const workspaceKey = createWorkspaceKey();
++      const store = workspaceLayoutStore.getState();
++      const terminalId = "term-herdr";
++      const terminalTabId = store.openTab({
++        workspaceKey,
++        target: { kind: "terminal", terminalId },
++        intent: "reveal",
++      });
++      const reconcile = (known: string[], revision: number) =>
++        workspaceLayoutStore.getState().reconcileTabs(workspaceKey, {
++          agentsHydrated: true,
++          terminalsHydrated: true,
++          activeAgentIds: [],
++          autoOpenAgentIds: [],
++          knownAgentIds: [],
++          knownTerminalIds: known,
++          standaloneTerminalIds: standalone ? known : [],
++          hasActivePendingDraftCreate: false,
++          terminalSnapshotRevision: revision,
++        });
++
++      reconcile([terminalId], 1);
++      reconcile([], 2);
++      const fallbackLayout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
++      const fallbackPane = findPaneById(fallbackLayout.root, fallbackLayout.focusedPaneId);
++      const fallbackTab = collectAllTabs(fallbackLayout.root).find(
++        (tab) => tab.tabId === fallbackPane?.focusedTabId,
++      );
++      expect(fallbackTab?.target.kind).toBe("draft");
++
++      reconcile([terminalId], 3);
++      const restoredLayout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
++      expect(findPaneContainingTab(restoredLayout.root, terminalTabId!)?.focusedTabId).toBe(
++        terminalTabId,
++      );
++      expect(collectAllTabs(restoredLayout.root)).toEqual(
++        expect.arrayContaining([
++          expect.objectContaining({
++            tabId: terminalTabId,
++            target: { kind: "terminal", terminalId },
++          }),
++          expect.objectContaining({ target: expect.objectContaining({ kind: "draft" }) }),
++        ]),
++      );
++    },
++  );
++
++  it("keeps a genuinely deleted terminal removed after a second authoritative empty snapshot", () => {
++    const workspaceKey = createWorkspaceKey();
++    const store = workspaceLayoutStore.getState();
++    const terminalId = "term-deleted";
++    store.openTab({
++      workspaceKey,
++      target: { kind: "terminal", terminalId },
++      intent: "reveal",
++    });
++    const reconcile = (known: string[], revision: number) =>
++      workspaceLayoutStore.getState().reconcileTabs(workspaceKey, {
++        agentsHydrated: true,
++        terminalsHydrated: true,
++        activeAgentIds: [],
++        autoOpenAgentIds: [],
++        knownAgentIds: [],
++        knownTerminalIds: known,
++        standaloneTerminalIds: [],
++        hasActivePendingDraftCreate: false,
++        terminalSnapshotRevision: revision,
++      });
++
++    reconcile([terminalId], 1);
++    reconcile([], 2);
++    reconcile([], 3);
++    reconcile([terminalId], 4);
++
++    const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
++    expect(collectAllTabs(layout.root).some((tab) => tab.target.kind === "terminal")).toBe(false);
++    const focusedPane = findPaneById(layout.root, layout.focusedPaneId);
++    expect(
++      collectAllTabs(layout.root).find((tab) => tab.tabId === focusedPane?.focusedTabId)?.target
++        .kind,
++    ).toBe("draft");
++  });
++
++  it("does not override an explicit fallback-tab selection when the terminal returns", () => {
++    const workspaceKey = createWorkspaceKey();
++    const store = workspaceLayoutStore.getState();
++    const terminalId = "term-herdr";
++    store.openTab({
++      workspaceKey,
++      target: { kind: "terminal", terminalId },
++      intent: "reveal",
++    });
++    const reconcile = (known: string[], revision: number) =>
++      workspaceLayoutStore.getState().reconcileTabs(workspaceKey, {
++        agentsHydrated: true,
++        terminalsHydrated: true,
++        activeAgentIds: [],
++        autoOpenAgentIds: [],
++        knownAgentIds: [],
++        knownTerminalIds: known,
++        standaloneTerminalIds: [],
++        hasActivePendingDraftCreate: false,
++        terminalSnapshotRevision: revision,
++      });
++
++    reconcile([terminalId], 1);
++    reconcile([], 2);
++    const fallbackLayout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
++    const fallbackTabId = findPaneById(
++      fallbackLayout.root,
++      fallbackLayout.focusedPaneId,
++    )?.focusedTabId;
++    expect(fallbackTabId).toBeTruthy();
++    store.focusTab(workspaceKey, fallbackTabId!);
++    reconcile([terminalId], 3);
++
++    const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
++    expect(findPaneById(layout.root, layout.focusedPaneId)?.focusedTabId).toBe(fallbackTabId);
++    expect(collectAllTabs(layout.root).some((tab) => tab.target.kind === "terminal")).toBe(false);
 +  });
 +
 +  it("reconcileTabs does not guess among multiple live non-standalone terminals", () => {
@@ -49502,6 +49657,172 @@ index e53f9c1911596dfa9c13785122a6e0d56bb11339..36bd78ef8fbc71468e201f17e564f7d8
      expect(contentTabs(workspaceLayoutStore.getState().getWorkspaceTabs(workspaceKey))).toEqual([]);
    });
  
+diff --git a/packages/app/src/stores/workspace-layout-store.ts b/packages/app/src/stores/workspace-layout-store.ts
+index 974b8c69640172f426cd5815ac2e6c503464b2a0..bd172b0318504e7854cf380b5d60ccc804b01403 100644
+--- a/packages/app/src/stores/workspace-layout-store.ts
++++ b/packages/app/src/stores/workspace-layout-store.ts
+@@ -57,7 +57,10 @@ import {
+   type WorkspaceTabSnapshot,
+   type WorkspaceLayout,
+ } from "@/stores/workspace-layout-actions";
+-import { normalizeWorkspaceTabTarget } from "@/workspace-tabs/identity";
++import {
++  buildDeterministicWorkspaceTabId,
++  normalizeWorkspaceTabTarget,
++} from "@/workspace-tabs/identity";
+ import { createValidatedPersistStorage } from "@/storage/validated-persist-storage";
+ import { panelTargetSupportsHostForWorkspaceKey } from "@/plugins/workspace-panels/locations";
+ 
+@@ -754,9 +757,97 @@ function createExplorerSidebarPane(
+   return targetPaneId ? splitPaneEmpty(workspaceKey, { targetPaneId, position: "right" }) : null;
+ }
+ 
++interface DisplacedFocusedTerminal {
++  terminalId: string;
++  fallbackTabId: string | null;
++  missingRevision: number | undefined;
++}
++
++function getFocusedWorkspaceTab(layout: WorkspaceLayout): WorkspaceTab | null {
++  const focusedPane = findPaneById(layout.root, layout.focusedPaneId);
++  return collectAllTabs(layout.root).find((tab) => tab.tabId === focusedPane?.focusedTabId) ?? null;
++}
++
++function retainDisplacedFocusedTerminal(input: {
++  displacedTerminal: DisplacedFocusedTerminal | null;
++  currentFocusedTab: WorkspaceTab | null;
++  knownTerminalIds: ReadonlySet<string>;
++  terminalSnapshotRevision: number | undefined;
++}): DisplacedFocusedTerminal | null {
++  const displacedTerminal = input.displacedTerminal;
++  if (!displacedTerminal) return null;
++  if (input.currentFocusedTab?.tabId !== displacedTerminal.fallbackTabId) return null;
++
++  const advancedPastMissingSnapshot =
++    input.terminalSnapshotRevision !== undefined &&
++    displacedTerminal.missingRevision !== undefined &&
++    input.terminalSnapshotRevision !== displacedTerminal.missingRevision;
++  if (!input.knownTerminalIds.has(displacedTerminal.terminalId) && advancedPastMissingSnapshot) {
++    return null;
++  }
++  return displacedTerminal;
++}
++
++function reconcileFocusedTerminalDisplacement(input: {
++  currentLayout: WorkspaceLayout;
++  reconciledLayout: WorkspaceLayout;
++  snapshot: WorkspaceTabSnapshot;
++  explorerSidebarPaneId: string | null;
++  displacedTerminal: DisplacedFocusedTerminal | null;
++}): { layout: WorkspaceLayout; displacedTerminal: DisplacedFocusedTerminal | null } {
++  const currentFocusedTab = getFocusedWorkspaceTab(input.currentLayout);
++  const knownTerminalIds = new Set(
++    input.snapshot.knownTerminalIds ?? input.snapshot.standaloneTerminalIds,
++  );
++  let displacedTerminal = retainDisplacedFocusedTerminal({
++    displacedTerminal: input.displacedTerminal,
++    currentFocusedTab,
++    knownTerminalIds,
++    terminalSnapshotRevision: input.snapshot.terminalSnapshotRevision,
++  });
++
++  if (
++    displacedTerminal &&
++    knownTerminalIds.has(displacedTerminal.terminalId) &&
++    input.snapshot.hasActivePendingDraftCreate !== true
++  ) {
++    const terminalId = displacedTerminal.terminalId;
++    const restoredLayout =
++      revealTargetInLayout({
++        layout: input.reconciledLayout,
++        target: { kind: "terminal", terminalId },
++        now: Date.now(),
++        placement: FOCUSED_PANE_PLACEMENT,
++        explorerSidebarPaneId: input.explorerSidebarPaneId,
++        createTabId: () => buildDeterministicWorkspaceTabId({ kind: "terminal", terminalId }),
++      })?.layout ?? input.reconciledLayout;
++    return { layout: restoredLayout, displacedTerminal: null };
++  }
++
++  if (
++    !displacedTerminal &&
++    currentFocusedTab?.target.kind === "terminal" &&
++    input.snapshot.terminalsHydrated &&
++    !knownTerminalIds.has(currentFocusedTab.target.terminalId)
++  ) {
++    const fallbackTabId = findPaneById(
++      input.reconciledLayout.root,
++      input.reconciledLayout.focusedPaneId,
++    )?.focusedTabId;
++    displacedTerminal = {
++      terminalId: currentFocusedTab.target.terminalId,
++      fallbackTabId: fallbackTabId ?? null,
++      missingRevision: input.snapshot.terminalSnapshotRevision,
++    };
++  }
++
++  return { layout: input.reconciledLayout, displacedTerminal };
++}
++
+ export function createWorkspaceLayoutStore(
+   ids: WorkspaceLayoutIdSource = defaultWorkspaceLayoutIds,
+ ) {
++  const displacedFocusedTerminalByWorkspace = new Map<string, DisplacedFocusedTerminal>();
+   return create<WorkspaceLayoutStore>()(
+     persist(
+       (set, get) => ({
+@@ -775,6 +866,9 @@ export function createWorkspaceLayoutStore(
+           if (!normalizedWorkspaceKey || !normalizedTarget) {
+             return null;
+           }
++          if (input.intent !== "background") {
++            displacedFocusedTerminalByWorkspace.delete(normalizedWorkspaceKey);
++          }
+           const placement = getOpenTabPlacement(
+             get(),
+             normalizedWorkspaceKey,
+@@ -1046,6 +1140,7 @@ export function createWorkspaceLayoutStore(
+           if (!normalizedWorkspaceKey || !normalizedTabId) {
+             return;
+           }
++          displacedFocusedTerminalByWorkspace.delete(normalizedWorkspaceKey);
+ 
+           set((state) => {
+             const layout = getWorkspaceLayout(state.layoutByWorkspace, normalizedWorkspaceKey);
+@@ -1091,6 +1186,7 @@ export function createWorkspaceLayoutStore(
+           if (!normalizedWorkspaceKey || !normalizedPaneId || !normalizedTabId) {
+             return;
+           }
++          displacedFocusedTerminalByWorkspace.delete(normalizedWorkspaceKey);
+           set((state) => {
+             const layout = getWorkspaceLayout(state.layoutByWorkspace, normalizedWorkspaceKey);
+             const nextLayout = selectTabInPaneInLayout({
+@@ -1218,8 +1314,24 @@ export function createWorkspaceLayoutStore(
+               },
+               snapshot,
+             );
++            const displacement = reconcileFocusedTerminalDisplacement({
++              currentLayout,
++              reconciledLayout: nextState.layout,
++              snapshot,
++              explorerSidebarPaneId,
++              displacedTerminal:
++                displacedFocusedTerminalByWorkspace.get(normalizedWorkspaceKey) ?? null,
++            });
++            if (displacement.displacedTerminal) {
++              displacedFocusedTerminalByWorkspace.set(
++                normalizedWorkspaceKey,
++                displacement.displacedTerminal,
++              );
++            } else {
++              displacedFocusedTerminalByWorkspace.delete(normalizedWorkspaceKey);
++            }
+             const nextLayout = keepWorkspaceFocusOutOfExplorerSidebar(
+-              nextState.layout,
++              displacement.layout,
+               explorerSidebarPaneId,
+               currentLayout.focusedPaneId,
+             );
 diff --git a/packages/app/src/styles/unistyles.ts b/packages/app/src/styles/unistyles.ts
 index b679d5e69442e4e2f1014442f129e087429edba8..29536ac7bca8ca1cb186de870d3e27aca1caee71 100644
 --- a/packages/app/src/styles/unistyles.ts
@@ -50472,7 +50793,7 @@ index 0000000000000000000000000000000000000000..705376066bd152014010baaf0821cc32
 +}
 diff --git a/packages/app/src/terminal/runtime/host-terminal.test.ts b/packages/app/src/terminal/runtime/host-terminal.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..678dca258aefbd212b7e63cfaca0788e0db688e8
+index 0000000000000000000000000000000000000000..039e9b7dc0c82a990b553b389db71375d40c5c58
 --- /dev/null
 +++ b/packages/app/src/terminal/runtime/host-terminal.test.ts
 @@ -0,0 +1,151 @@
@@ -50483,7 +50804,7 @@ index 0000000000000000000000000000000000000000..678dca258aefbd212b7e63cfaca0788e
 +describe("openOrCreateHostTerminal", () => {
 +  it("reattaches the existing matching terminal instead of spawning a second writer", async () => {
 +    const listTerminals = vi.fn(async () => ({
-+      cwd: "C:\\Users\\K",
++      cwd: "C:\\Users\\Example",
 +      terminals: [
 +        { id: "other", name: "Host terminal", scope: "host" as const, activity: null },
 +        { id: "herdr-live", name: "Herdr (live session)", scope: "host" as const, activity: null },
@@ -50512,7 +50833,7 @@ index 0000000000000000000000000000000000000000..678dca258aefbd212b7e63cfaca0788e
 +    await expect(openOrCreateHostTerminal(client, { profileId: "herdr" })).resolves.toEqual({
 +      id: "herdr-live",
 +      name: "Herdr (live session)",
-+      cwd: "C:\\Users\\K",
++      cwd: "C:\\Users\\Example",
 +    });
 +    expect(listTerminals).toHaveBeenCalledWith(undefined, undefined, { scope: "host" });
 +    expect(createTerminal).not.toHaveBeenCalled();
@@ -50523,7 +50844,7 @@ index 0000000000000000000000000000000000000000..678dca258aefbd212b7e63cfaca0788e
 +      terminal: {
 +        id: "herdr-new",
 +        name: "Herdr (live session)",
-+        cwd: "C:\\Users\\K",
++        cwd: "C:\\Users\\Example",
 +        scope: "host" as const,
 +        activity: null,
 +      },
@@ -50532,7 +50853,7 @@ index 0000000000000000000000000000000000000000..678dca258aefbd212b7e63cfaca0788e
 +    }));
 +    const client = {
 +      listTerminals: vi.fn(async () => ({
-+        cwd: "C:\\Users\\K",
++        cwd: "C:\\Users\\Example",
 +        terminals: [],
 +        requestId: "list-1",
 +      })),
@@ -50574,7 +50895,7 @@ index 0000000000000000000000000000000000000000..678dca258aefbd212b7e63cfaca0788e
 +      terminal: {
 +        id: "host-new",
 +        name: "Host terminal",
-+        cwd: "C:\\Users\\K",
++        cwd: "C:\\Users\\Example",
 +        scope: "host" as const,
 +        activity: null,
 +      },
@@ -50588,7 +50909,7 @@ index 0000000000000000000000000000000000000000..678dca258aefbd212b7e63cfaca0788e
 +    expect(first).toBe(second);
 +    expect(listTerminals).toHaveBeenCalledTimes(1);
 +
-+    resolveList({ cwd: "C:\\Users\\K", terminals: [], requestId: "list-1" });
++    resolveList({ cwd: "C:\\Users\\Example", terminals: [], requestId: "list-1" });
 +    await expect(Promise.all([first, second])).resolves.toEqual([
 +      expect.objectContaining({ id: "host-new" }),
 +      expect.objectContaining({ id: "host-new" }),
@@ -50608,7 +50929,7 @@ index 0000000000000000000000000000000000000000..678dca258aefbd212b7e63cfaca0788e
 +      terminal: {
 +        id: "host-new",
 +        name: "Host terminal",
-+        cwd: "C:\\Users\\K",
++        cwd: "C:\\Users\\Example",
 +        scope: "host" as const,
 +        activity: null,
 +      },
@@ -50623,7 +50944,7 @@ index 0000000000000000000000000000000000000000..678dca258aefbd212b7e63cfaca0788e
 +    expect(second.shouldNavigate).toBe(false);
 +    expect(first.result).toBe(second.result);
 +
-+    resolveList({ cwd: "C:\\Users\\K", terminals: [], requestId: "list-1" });
++    resolveList({ cwd: "C:\\Users\\Example", terminals: [], requestId: "list-1" });
 +    await first.result;
 +  });
 +});
@@ -51353,7 +51674,7 @@ index eff3f3873cd8b02483d7183f49d13231a4fc424b..27a29af3db190fdfa40e5a4ce9e1b69b
 +  return `${formatVersionWithPrefix(previewVersion)} \u00b7 ${previewLabel}`;
 +}
 diff --git a/packages/app/src/utils/host-routes.test.ts b/packages/app/src/utils/host-routes.test.ts
-index 644139e92d298251a6a45cb47034de0b1b170088..a318f329b6259678678e670c16fe178209088adf 100644
+index 644139e92d298251a6a45cb47034de0b1b170088..744557195c1ebcf64c9c653d8c1def4bc1206ff3 100644
 --- a/packages/app/src/utils/host-routes.test.ts
 +++ b/packages/app/src/utils/host-routes.test.ts
 @@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
@@ -51372,10 +51693,10 @@ index 644139e92d298251a6a45cb47034de0b1b170088..a318f329b6259678678e670c16fe1782
 +  it("keeps the daemon terminal id and reconnect context in the route", () => {
 +    expect(
 +      buildHostTerminalRoute("server one", "term/1", {
-+        cwd: "C:\\Users\\K",
++        cwd: "C:\\Users\\Example",
 +        profileId: "herdr",
 +      }),
-+    ).toBe("/h/server%20one/terminal/term%2F1?cwd=C%3A%5CUsers%5CK&profile=herdr");
++    ).toBe("/h/server%20one/terminal/term%2F1?cwd=C%3A%5CUsers%5CExample&profile=herdr");
 +  });
 +
 +  it("rejects an empty terminal id", () => {
@@ -51416,6 +51737,26 @@ index 5b8b6ad8d149ed89f6c3a4adce22da6cf261985f..9ed3eb7f46a14dd83acc925db133999d
  export function buildHostOpenProjectRoute(serverId: string) {
    const base = buildHostRootRoute(serverId);
    if (base === "/") {
+diff --git a/packages/app/src/workspace-tabs/agent-visibility.ts b/packages/app/src/workspace-tabs/agent-visibility.ts
+index 1f8f5c5ed45682244e49941d722509038277b4b9..e973942becf8aead2a93ea5bd05d830ca8281751 100644
+--- a/packages/app/src/workspace-tabs/agent-visibility.ts
++++ b/packages/app/src/workspace-tabs/agent-visibility.ts
+@@ -66,6 +66,7 @@ export function buildWorkspaceTabSnapshot(input: {
+   standaloneTerminalIds: Iterable<string>;
+   hasActivePendingTerminalCreate: boolean;
+   hasActivePendingDraftCreate: boolean;
++  terminalSnapshotRevision?: number;
+ }): WorkspaceTabSnapshot {
+   return {
+     agentsHydrated: input.agentsHydrated,
+@@ -77,6 +78,7 @@ export function buildWorkspaceTabSnapshot(input: {
+     standaloneTerminalIds: input.standaloneTerminalIds,
+     hasActivePendingTerminalCreate: input.hasActivePendingTerminalCreate,
+     hasActivePendingDraftCreate: input.hasActivePendingDraftCreate,
++    terminalSnapshotRevision: input.terminalSnapshotRevision,
+   };
+ }
+ 
 diff --git a/packages/client/src/daemon-client.ts b/packages/client/src/daemon-client.ts
 index 238b33461184f4150006114e3a4a2b65032e1393..43503946677949512c2fc922120dc4b850ea066d 100644
 --- a/packages/client/src/daemon-client.ts
