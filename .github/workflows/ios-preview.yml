@@ -1,4 +1,4 @@
-name: Build unsigned Aigo Preview for iPhone
+name: Build unsigned AiGo Preview for iPhone
 
 on:
   workflow_dispatch:
@@ -52,6 +52,10 @@ jobs:
         working-directory: paseo
         run: npm ci
 
+      - name: Regenerate AiGo brand assets from the approved master
+        working-directory: paseo
+        run: npm run generate:brand-assets --workspace=@getpaseo/app
+
       - name: Build app dependencies and terminal assets
         working-directory: paseo
         run: |
@@ -69,7 +73,7 @@ jobs:
           node scripts/verify-notification-registration.cjs paseo
           node scripts/verify-gesture-lifecycle.cjs paseo
           cd paseo/packages/app
-          npm run test -- --project unit src/plugins/react-native/desktop-view-policy.test.ts src/plugins/react-native/desktop-view.native.test.tsx src/constants/layout-breakpoints.test.ts src/components/root-error-boundary.test.tsx --bail=1
+          npm run test -- --project unit src/plugins/react-native/desktop-view-policy.test.ts src/plugins/react-native/desktop-view.native.test.tsx src/constants/layout-breakpoints.test.ts src/components/root-error-boundary.test.tsx src/terminal/runtime/terminal-virtual-keyboard.test.ts src/terminal/native-renderer/terminal-size-measurement.test.ts --bail=1
           npm run test -- --project unit src/push-notifications/preview-diagnostic.test.ts src/agent-stream/permission-response.test.ts src/agent-stream/permission-response-feedback.test.tsx src/i18n/resources.test.ts --bail=1
           npm run test -- --project unit src/subagents/select.test.ts src/subagents/track-presentation.test.ts src/subagents/archive-finished.test.ts src/panels/provider-subagent-history.test.ts src/panels/provider-subagent-panel.test.tsx --bail=1
           cd ../../..
@@ -97,7 +101,7 @@ jobs:
         with:
           name: aigo-preview-unsigned-iphone
           path: |
-            ${{ runner.temp }}/aigo-ios/Aigo-Preview-unsigned.ipa
+            ${{ runner.temp }}/aigo-ios/AiGo-Preview-unsigned.ipa
             ${{ runner.temp }}/aigo-ios/build-manifest.json
           if-no-files-found: error
           retention-days: 1

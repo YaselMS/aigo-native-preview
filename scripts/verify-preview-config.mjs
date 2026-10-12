@@ -5,12 +5,12 @@ const configPath = process.argv[2];
 assert.ok(configPath, "Pass the JSON output of expo config --type prebuild.");
 const parsed = JSON.parse(readFileSync(configPath, "utf8"));
 const config = parsed.expo ?? parsed;
-assert.equal(config.name, "Aigo Preview");
+assert.equal(config.name, "AiGo");
 assert.equal(config.slug, "aigo-preview");
 assert.equal(config.scheme, "aigo-preview");
 assert.equal(config.ios?.bundleIdentifier, "dev.aigo.preview");
 assert.equal(config.extra?.aigoNativePreview, true);
-assert.equal(config.extra?.aigoPreviewLabel, "Aigo Preview 6");
+assert.equal(config.extra?.aigoPreviewLabel, "AiGo Preview 6");
 assert.equal(config.extra?.aigoNotificationDiagnostics, true);
 assert.equal(config.version, "0.7.7");
 assert.equal(config.ios?.buildNumber, "7007999");
@@ -24,4 +24,4 @@ assert.ok(
   ),
   "The diagnostic preview must include the native notification capability.",
 );
-console.log("Independent Aigo Preview identity and native notification diagnostic configuration verified.");
+console.log("Independent AiGo display branding, preview identity, and native notification diagnostic configuration verified.");

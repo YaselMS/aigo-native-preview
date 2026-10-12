@@ -1,0 +1,7 @@
+# Paths permitted in the public iPhone patch. Keep this list deliberately narrow.
+package-lock.json
+packages/app
+packages/plugin
+patches/expo-notifications+0.32.16.patch
+patches/react-native-gesture-handler+2.28.0.patch
+scripts/postinstall-patches.mjs

@@ -60,7 +60,7 @@ const listing = JSON.parse(run("xcodebuild", ["-list", "-json", "-workspace", wo
 assert.ok(listing.workspace?.schemes?.includes(scheme), `Generated scheme ${scheme} is missing.`);
 assert.ok(checkEntitlements(ios) > 0, "The generated app has no notification entitlement file.");
 mkdirSync(output, { recursive: true });
-const archive = join(output, "Aigo.xcarchive");
+const archive = join(output, "AiGo.xcarchive");
 run("xcodebuild", [
   "-workspace", workspace,
   "-scheme", scheme,
@@ -79,6 +79,7 @@ run("xcodebuild", [
 const application = exactlyOne(join(archive, "Products", "Applications"), ".app");
 const info = plist(join(application, "Info.plist"));
 assert.equal(info.CFBundleIdentifier, "dev.aigo.preview");
+assert.equal(info.CFBundleDisplayName, "AiGo");
 assert.equal(info.CFBundleShortVersionString, "0.7.7");
 assert.equal(info.CFBundleVersion, "7007999");
 assert.ok(info.UISupportedInterfaceOrientations?.includes("UIInterfaceOrientationLandscapeLeft"));
@@ -91,10 +92,12 @@ assert.ok(architectures.split(/\s+/).includes("arm64"), "The app is missing the 
 const payload = join(output, "Payload");
 mkdirSync(payload);
 cpSync(application, join(payload, basename(application)), { recursive: true, dereference: false });
-const ipa = join(output, "Aigo-Preview-unsigned.ipa");
+const ipa = join(output, "AiGo-Preview-unsigned.ipa");
 run("ditto", ["-c", "-k", "--keepParent", "Payload", basename(ipa)], output);
 writeFileSync(join(output, "build-manifest.json"), `${JSON.stringify({
-  app: "Aigo Preview",
+  app: "AiGo",
+  previewLabel: "AiGo Preview 6",
+  displayName: info.CFBundleDisplayName,
   preview: 6,
   bundleIdentifier: info.CFBundleIdentifier,
   upstreamCommit: upstream,

@@ -1,0 +1,4 @@
+# Intentional local changes that are not part of the iPhone source package.
+packages/server
+packages/cli
+packages/aigo-preview2-config.json

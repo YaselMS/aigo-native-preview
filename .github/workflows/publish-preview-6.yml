@@ -57,6 +57,9 @@ jobs:
           root = pathlib.Path('artifact')
           manifest = json.loads((root / 'build-manifest.json').read_text())
           assert manifest['buildKitCommit'] == os.environ['BUILD_COMMIT']
+          assert manifest['app'] == 'AiGo'
+          assert manifest['previewLabel'] == 'AiGo Preview 6'
+          assert manifest['displayName'] == 'AiGo'
           assert manifest['bundleIdentifier'] == 'dev.aigo.preview'
           assert manifest['preview'] == 6
           assert manifest['upstreamCommit'] == '9400a49af670fdb5db4af58e73f8df98588dbea9'
@@ -65,7 +68,7 @@ jobs:
           assert manifest['notificationDiagnostics'] is True
           assert manifest['requestedApnsEnvironment'] == 'production'
           assert manifest['sha256'] == os.environ['IPA_SHA256']
-          assert hashlib.sha256((root / 'Aigo-Preview-unsigned.ipa').read_bytes()).hexdigest() == os.environ['IPA_SHA256']
+          assert hashlib.sha256((root / 'AiGo-Preview-unsigned.ipa').read_bytes()).hexdigest() == os.environ['IPA_SHA256']
       - name: Publish the unsigned preview download
         run: |
-          gh release create v0.1.0-preview.6 artifact/Aigo-Preview-unsigned.ipa artifact/build-manifest.json --target "$BUILD_COMMIT" --title 'Aigo Preview 6 — subagent status and history recovery' --notes-file RELEASE-NOTES-6.md --prerelease
+          gh release create v0.1.0-preview.6 artifact/AiGo-Preview-unsigned.ipa artifact/build-manifest.json --target "$BUILD_COMMIT" --title 'AiGo Preview 6 - subagent status and history recovery' --notes-file RELEASE-NOTES-6.md --prerelease
