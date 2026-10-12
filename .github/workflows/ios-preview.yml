@@ -1,4 +1,4 @@
-name: Build unsigned AiGo Preview for iPhone
+name: Build unsigned AiGo Preview 7 for iPhone
 
 on:
   workflow_dispatch:
@@ -62,10 +62,11 @@ jobs:
           npm run build:app-deps
           npm run build:terminal-webview --workspace=@getpaseo/app
 
-      - name: Check client types and lint
+      - name: Check app, protocol, client and server types and lint
         working-directory: paseo
         run: |
-          npm run typecheck --workspace=@getpaseo/app --workspace=@getpaseo/plugin
+          npm run build:client
+          npm run typecheck --workspace=@getpaseo/protocol --workspace=@getpaseo/client --workspace=@getpaseo/server --workspace=@getpaseo/app --workspace=@getpaseo/plugin
           npm run lint
 
       - name: Check viewer navigation and plugin behavior
@@ -76,6 +77,9 @@ jobs:
           npm run test -- --project unit src/plugins/react-native/desktop-view-policy.test.ts src/plugins/react-native/desktop-view.native.test.tsx src/constants/layout-breakpoints.test.ts src/components/root-error-boundary.test.tsx src/terminal/runtime/terminal-virtual-keyboard.test.ts src/terminal/native-renderer/terminal-size-measurement.test.ts --bail=1
           npm run test -- --project unit src/push-notifications/preview-diagnostic.test.ts src/agent-stream/permission-response.test.ts src/agent-stream/permission-response-feedback.test.tsx src/i18n/resources.test.ts --bail=1
           npm run test -- --project unit src/subagents/select.test.ts src/subagents/track-presentation.test.ts src/subagents/archive-finished.test.ts src/panels/provider-subagent-history.test.ts src/panels/provider-subagent-panel.test.tsx --bail=1
+          npm run test -- --project unit src/components/terminal-resize-debouncer.test.ts src/terminal/native-renderer/terminal-mouse-events.test.ts src/terminal/runtime/host-terminal.test.ts src/terminal/runtime/host-terminal-screen-state.test.ts src/utils/host-routes.test.ts src/stores/workspace-layout-store.test.ts --bail=1
+          cd ../server
+          npx vitest run src/terminal/terminal-session-controller.test.ts src/terminal/terminal-size-ownership.test.ts --bail=1
           cd ../../..
           ln -s ../paseo/node_modules aigo-native-desktop/node_modules
           cd aigo-native-desktop
@@ -99,7 +103,7 @@ jobs:
       - name: Save only the IPA and build manifest
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: aigo-preview-unsigned-iphone
+          name: aigo-preview-7-unsigned-iphone
           path: |
             ${{ runner.temp }}/aigo-ios/AiGo-Preview-unsigned.ipa
             ${{ runner.temp }}/aigo-ios/build-manifest.json

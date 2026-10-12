@@ -2,3 +2,4 @@
 packages/server
 packages/cli
 packages/aigo-preview2-config.json
+packages/app/.vitest-attachments

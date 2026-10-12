@@ -25,3 +25,5 @@ First phone acceptance test:
 Notifications and final viewer layout are not acceptance criteria for this first build. They remain product work. Windows source checks and an iOS JavaScript bundle are not evidence of a successful native archive or device run.
 
 Preview 6 source review: the added subagent paths contain only app code and synthetic tests. No host addresses, pairing records, notification topic, credentials or live conversation IDs are included. CI now runs the subagent selector/archive/presentation and history request/panel regressions. Identity validators require 0.7.7/build7007999. The gesture verification script normalizes Windows line endings before checking its guard.
+
+Preview 7 source review extends the public patch only to the protocol, client and daemon files required for host-scoped terminals and terminal-size ownership. The patch contains no runtime home, pairing state, terminal transcript, host address, credential, signing material, or private project file. CI validates version 0.7.8/build7008999 and runs the host-terminal, mouse-ordering, terminal ownership, routing, and workspace-layout regressions before creating an unsigned artifact.

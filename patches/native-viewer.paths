@@ -1,7 +1,20 @@
 # Paths permitted in the public iPhone patch. Keep this list deliberately narrow.
 package-lock.json
 packages/app
+packages/client/src/daemon-client.ts
 packages/plugin
+packages/protocol/src/messages.create-terminal-size.test.ts
+packages/protocol/src/messages.ts
+packages/server/src/server/session.ts
+packages/server/src/server/websocket-server.ts
+packages/server/src/terminal/terminal-manager.ts
+packages/server/src/terminal/terminal-session-controller.test.ts
+packages/server/src/terminal/terminal-session-controller.ts
+packages/server/src/terminal/terminal-size-ownership.test.ts
+packages/server/src/terminal/terminal-worker-process.ts
+packages/server/src/terminal/terminal-worker-protocol.ts
+packages/server/src/terminal/terminal.ts
+packages/server/src/terminal/worker-terminal-manager.ts
 patches/expo-notifications+0.32.16.patch
 patches/react-native-gesture-handler+2.28.0.patch
 scripts/postinstall-patches.mjs

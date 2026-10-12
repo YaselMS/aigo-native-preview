@@ -74,16 +74,25 @@ function git(parameters, { cwd = source, env = {}, encoding = "utf8" } = {}) {
   return result.stdout;
 }
 
-function permitted(path) {
+function longestMatch(path, candidates) {
   const normalized = path.replaceAll("\\", "/");
-  return scopes.some((scope) => normalized === scope || normalized.startsWith(`${scope}/`));
+  return candidates.reduce(
+    (longest, candidate) =>
+      normalized === candidate || normalized.startsWith(`${candidate}/`)
+        ? Math.max(longest, candidate.length)
+        : longest,
+    -1,
+  );
+}
+
+function permitted(path) {
+  const scopeMatch = longestMatch(path, scopes);
+  return scopeMatch >= 0 && scopeMatch > longestMatch(path, exclusions);
 }
 
 function excluded(path) {
-  const normalized = path.replaceAll("\\", "/");
-  return exclusions.some(
-    (exclusion) => normalized === exclusion || normalized.startsWith(`${exclusion}/`),
-  );
+  const exclusionMatch = longestMatch(path, exclusions);
+  return exclusionMatch >= 0 && exclusionMatch >= longestMatch(path, scopes);
 }
 
 function nulPaths(buffer) {
@@ -106,7 +115,8 @@ assert.deepEqual(
   `Refusing to omit unreviewed paths outside the scopes and exclusions:\n${outsideScope.join("\n")}`,
 );
 const intentionallyExcluded = [...changed].filter(excluded).sort();
-const patchPaths = [...changed].filter(permitted).sort();
+const patchPaths = [...changed].filter((path) => permitted(path) && !excluded(path)).sort();
+assert.ok(patchPaths.length > 0, "The approved paths contain no changes from the pinned upstream commit.");
 
 const temporary = mkdtempSync(join(tmpdir(), "aigo-native-patch-"));
 try {
@@ -114,7 +124,7 @@ try {
     const index = join(temporary, indexName);
     const env = { GIT_INDEX_FILE: index };
     git(["read-tree", UPSTREAM_COMMIT], { env });
-    git(["add", "-A", "--", ...scopes], { env });
+    git(["add", "-A", "--", ...patchPaths], { env });
     return git(
       [
         "diff",
@@ -133,7 +143,7 @@ try {
 
   const first = snapshot("index-one");
   const second = snapshot("index-two");
-  assert.ok(first.length > 0, "The approved paths contain no changes from the pinned upstream commit.");
+  assert.ok(first.length > 0, "The approved path snapshot is empty.");
   assert.deepEqual(
     first,
     second,

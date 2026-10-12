@@ -1,8 +1,8 @@
 # AiGo Preview iPhone build kit
 
-A source-only build kit for the native Paseo-derived AiGo client. Preview 6 targets version 0.7.7, build 7007999, with subagent attention and history recovery fixes. Earlier native desktop, rotation and request-response fixes remain included. The upstream chat protocol remains based on Paseo 0.7.2.
+A source-only build kit for the native Paseo-derived AiGo client. Preview 7 targets version 0.7.8, build 7008999, with complete AiGo branding, host-scoped terminals, Herdr reattachment, terminal ownership/final-column repairs, and client-local navigation behavior. Earlier native desktop, notification, subagent, rotation and request-response fixes remain included. The upstream base remains Paseo 0.7.2 with reviewed protocol, client and daemon compatibility changes carried in the patch.
 
-Preview 5 has physical-device confirmation of local notifications and Apple device-token registration. Version-one remote alerts use ntfy; the locked-phone alert, exact conversation, response and agent continuation loop passed. Native AiGo remote push remains out of this release. Preview 6 run 9 passed CI and independent verification of both the build artifact and published IPA checksum. [Download Preview 6 run 9](https://github.com/YaselMS/aigo-native-preview/releases/download/v0.1.0-preview.6-run9/AiGo-Preview-unsigned.ipa) · [Install and test notes](RELEASE-NOTES-6.md). Physical-device update acceptance remains pending.
+Preview 5 has physical-device confirmation of local notifications and Apple device-token registration. Version-one remote alerts use ntfy; the locked-phone alert, exact conversation, response and agent continuation loop passed. Native AiGo remote push remains out of this release. Preview 6 run 9 remains available as the rollback baseline. Preview 7 publication and physical-device acceptance are tracked in [the Preview 7 notes](RELEASE-NOTES-7.md).
 
 ## Refresh the reviewed patch
 

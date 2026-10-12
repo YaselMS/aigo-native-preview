@@ -80,8 +80,8 @@ const application = exactlyOne(join(archive, "Products", "Applications"), ".app"
 const info = plist(join(application, "Info.plist"));
 assert.equal(info.CFBundleIdentifier, "dev.aigo.preview");
 assert.equal(info.CFBundleDisplayName, "AiGo");
-assert.equal(info.CFBundleShortVersionString, "0.7.7");
-assert.equal(info.CFBundleVersion, "7007999");
+assert.equal(info.CFBundleShortVersionString, "0.7.8");
+assert.equal(info.CFBundleVersion, "7008999");
 assert.ok(info.UISupportedInterfaceOrientations?.includes("UIInterfaceOrientationLandscapeLeft"));
 assert.ok(info.UISupportedInterfaceOrientations?.includes("UIInterfaceOrientationLandscapeRight"));
 assert.ok(info.CFBundleSupportedPlatforms?.includes("iPhoneOS"), "Expected a physical-device app.");
@@ -96,9 +96,9 @@ const ipa = join(output, "AiGo-Preview-unsigned.ipa");
 run("ditto", ["-c", "-k", "--keepParent", "Payload", basename(ipa)], output);
 writeFileSync(join(output, "build-manifest.json"), `${JSON.stringify({
   app: "AiGo",
-  previewLabel: "AiGo Preview 6",
+  previewLabel: "AiGo Preview 7",
   displayName: info.CFBundleDisplayName,
-  preview: 6,
+  preview: 7,
   bundleIdentifier: info.CFBundleIdentifier,
   upstreamCommit: upstream,
   buildKitCommit: process.env.GITHUB_SHA ?? null,
