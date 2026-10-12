@@ -43080,6 +43080,64 @@ index 6a5764ff99ba8c20d0cd658d410897b1a9c1a085..66d3f4fdf8431057433bb7097e374ec0
      { label: "Collected at", value: new Date().toISOString() },
      { label: "App version", value: input.appVersion ?? "unknown" },
      { label: "Platform", value: input.platform },
+diff --git a/packages/app/src/i18n/resources.test.ts b/packages/app/src/i18n/resources.test.ts
+index 17be56be3b7e8e2de0481d33edc5917277c95d0a..776b90b3c0793bf2198a077729cedbb7597725f6 100644
+--- a/packages/app/src/i18n/resources.test.ts
++++ b/packages/app/src/i18n/resources.test.ts
+@@ -273,7 +273,7 @@ describe("translation resources", () => {
+     expect(en.settings.host.notFound).toBe("Host not found");
+     expect(en.settings.host.connections.title).toBe("Connections");
+     expect(en.settings.host.daemon.restart.title).toBe("Restart daemon");
+-    expect(en.settings.host.orchestration.enableTools.title).toBe("Enable Paseo tools");
++    expect(en.settings.host.orchestration.enableTools.title).toBe("Enable AiGo tools");
+     expect(en.settings.providers.title).toBe("Providers");
+     expect(en.settings.providers.models.addModel).toBe("Add model");
+     expect(en.settings.providers.diagnostic.title).toBe("Diagnostic");
+@@ -349,7 +349,7 @@ describe("translation resources", () => {
+   });
+ 
+   it("includes onboarding and direct connection keys for the Batch 4E migration", () => {
+-    expect(en.onboarding.title).toBe("Welcome to Paseo");
++    expect(en.onboarding.title).toBe("Welcome to AiGo");
+     expect(en.onboarding.actions.settings).toBe("Settings");
+     expect(en.pairing.direct.title).toBe("Direct connection");
+     expect(en.pairing.direct.fields.host).toBe("Host");
+@@ -581,7 +581,7 @@ describe("translation resources", () => {
+     expect(en.message.compaction.completed).toBe("Context compacted");
+     expect(en.agentPanel.archived.callout).toBe("This agent is archived");
+     expect(en.agentPanel.archived.unarchive).toBe("Unarchive");
+-    expect(en.desktop.quitting.title).toBe("Quitting Paseo...");
++    expect(en.desktop.quitting.title).toBe("Quitting AiGo...");
+     expect(en.desktop.quitting.detail).toBe("Stopping the local daemon.");
+     expect(en.composer.attachments.dropImagesHere).toBe("Drop images here");
+   });
+@@ -642,7 +642,7 @@ describe("translation resources", () => {
+     );
+     expect(en.desktop.rosetta.title).toBe("Download the Apple Silicon build");
+     expect(en.desktop.rosetta.runningIntel).toBe(
+-      "You're running the Intel build of Paseo under Rosetta on Apple Silicon.",
++      "You're running the Intel build of AiGo under Rosetta on Apple Silicon.",
+     );
+     expect(en.desktop.rosetta.highCpu).toBe(
+       "This causes high CPU usage. Download the Apple Silicon build to fix it.",
+@@ -670,7 +670,7 @@ describe("translation resources", () => {
+     expect(en.desktop.permissions.empty.notifications).toBe(
+       "Notification status has not been checked yet.",
+     );
+-    expect(en.desktop.permissions.testNotification.title).toBe("Paseo notification test");
++    expect(en.desktop.permissions.testNotification.title).toBe("AiGo notification test");
+     expect(en.desktop.permissions.testNotification.failed).toBe("Failed to send notification.");
+   });
+ 
+@@ -691,7 +691,7 @@ describe("translation resources", () => {
+       "Failed to fetch daemon status: {{message}}",
+     );
+     expect(en.desktop.daemon.loadFailed).toBe("Unable to load desktop daemon status.");
+-    expect(en.desktop.integrations.cli.installFailed).toBe("Unable to install the Paseo CLI.");
++    expect(en.desktop.integrations.cli.installFailed).toBe("Unable to install the AiGo CLI.");
+   });
+ 
+   it("includes remaining utility chrome keys for the Batch 4T migration", () => {
 diff --git a/packages/app/src/i18n/resources/ar.ts b/packages/app/src/i18n/resources/ar.ts
 index ae659573b3a21744d0b862de6dd718edc053da26..b83f6b3a47997bae278449b404012d2806de82d2 100644
 --- a/packages/app/src/i18n/resources/ar.ts
