@@ -77,7 +77,7 @@ jobs:
           npm run test -- --project unit src/plugins/react-native/desktop-view-policy.test.ts src/plugins/react-native/desktop-view.native.test.tsx src/constants/layout-breakpoints.test.ts src/components/root-error-boundary.test.tsx src/terminal/runtime/terminal-virtual-keyboard.test.ts src/terminal/native-renderer/terminal-size-measurement.test.ts --bail=1
           npm run test -- --project unit src/push-notifications/preview-diagnostic.test.ts src/agent-stream/permission-response.test.ts src/agent-stream/permission-response-feedback.test.tsx src/i18n/resources.test.ts --bail=1
           npm run test -- --project unit src/subagents/select.test.ts src/subagents/track-presentation.test.ts src/subagents/archive-finished.test.ts src/panels/provider-subagent-history.test.ts src/panels/provider-subagent-panel.test.tsx --bail=1
-          npm run test -- --project unit src/components/terminal-resize-debouncer.test.ts src/terminal/native-renderer/terminal-mouse-events.test.ts src/terminal/runtime/host-terminal.test.ts src/terminal/runtime/host-terminal-screen-state.test.ts src/utils/host-routes.test.ts src/stores/workspace-layout-store.test.ts --bail=1
+          npm run test -- --project unit src/components/terminal-resize-debouncer.test.ts src/terminal/native-renderer/terminal-mouse-events.test.ts src/terminal/runtime/host-terminal.test.ts src/terminal/runtime/host-terminal-screen-state.test.ts src/terminal/runtime/terminal-layout-focus.test.ts src/utils/host-routes.test.ts src/stores/workspace-layout-store.test.ts --bail=1
           cd ../server
           npx vitest run src/terminal/terminal-session-controller.test.ts src/terminal/terminal-size-ownership.test.ts --bail=1
           cd ../../..

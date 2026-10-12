@@ -43163,7 +43163,7 @@ index 438d72d85ccd4c1d08a1aa1b6130c6ee112f5d41..8f031e6c55e0a25a8d25364d4fd8f784
    onResize?: (input: {
      rows: number;
 diff --git a/packages/app/src/components/terminal-pane.tsx b/packages/app/src/components/terminal-pane.tsx
-index 3e987990358ceb285f29f9f780683270fa4eb43c..e65718c1462bac5d7df44d5e18799dfa10409ab4 100644
+index 3e987990358ceb285f29f9f780683270fa4eb43c..f4bcb5beb108047936e44d2adb82708161f3bed0 100644
 --- a/packages/app/src/components/terminal-pane.tsx
 +++ b/packages/app/src/components/terminal-pane.tsx
 @@ -2,10 +2,21 @@ import { LoadingSpinner } from "@/components/ui/loading-spinner";
@@ -43214,7 +43214,15 @@ index 3e987990358ceb285f29f9f780683270fa4eb43c..e65718c1462bac5d7df44d5e18799dfa
  import { getWorkspaceTerminalSession } from "@/terminal/runtime/workspace-terminal-session";
  import {
    EMPTY_FOCUS_CLAIM_STATE,
-@@ -85,6 +106,7 @@ interface TerminalPaneProps {
+@@ -48,6 +69,7 @@ import {
+   type TerminalStreamControllerStatus,
+ } from "@/terminal/runtime/terminal-stream-controller";
+ import { resolveTerminalRestoreOptions } from "@/terminal/runtime/terminal-restore-options";
++import { shouldRestoreTerminalFocusAfterLayout } from "@/terminal/runtime/terminal-layout-focus";
+ import { usePanelStore } from "@/stores/panel-store";
+ import { useBlockMobilePanelOpenGestures } from "@/mobile-panels/provider";
+ import { useSessionStore } from "@/stores/session-store";
+@@ -85,6 +107,7 @@ interface TerminalPaneProps {
    terminalId: string;
    isWorkspaceFocused: boolean;
    isPaneFocused: boolean;
@@ -43222,7 +43230,7 @@ index 3e987990358ceb285f29f9f780683270fa4eb43c..e65718c1462bac5d7df44d5e18799dfa
    onOpenFileExplorer: () => void;
    onOpenWorkspaceFile: (request: WorkspaceFileOpenRequest) => void;
  }
-@@ -170,12 +192,14 @@ interface KeyboardToggleButtonProps {
+@@ -170,12 +193,14 @@ interface KeyboardToggleButtonProps {
    isKeyboardVisible: boolean;
    iconColor: string;
    onToggle: () => void;
@@ -43237,7 +43245,7 @@ index 3e987990358ceb285f29f9f780683270fa4eb43c..e65718c1462bac5d7df44d5e18799dfa
  }: KeyboardToggleButtonProps) {
    const label = isKeyboardVisible ? "Hide keyboard" : "Show keyboard";
    const Icon = isKeyboardVisible ? KeyboardOffIcon : KeyboardIcon;
-@@ -195,7 +219,88 @@ function KeyboardToggleButton({
+@@ -195,7 +220,88 @@ function KeyboardToggleButton({
        onPress={onToggle}
        style={pressableStyle}
      >
@@ -43327,7 +43335,7 @@ index 3e987990358ceb285f29f9f780683270fa4eb43c..e65718c1462bac5d7df44d5e18799dfa
      </Pressable>
    );
  }
-@@ -206,6 +311,7 @@ export function TerminalPane({
+@@ -206,6 +312,7 @@ export function TerminalPane({
    terminalId,
    isWorkspaceFocused,
    isPaneFocused,
@@ -43335,7 +43343,7 @@ index 3e987990358ceb285f29f9f780683270fa4eb43c..e65718c1462bac5d7df44d5e18799dfa
    onOpenFileExplorer,
    onOpenWorkspaceFile,
  }: TerminalPaneProps) {
-@@ -214,6 +320,7 @@ export function TerminalPane({
+@@ -214,6 +321,7 @@ export function TerminalPane({
    const isAppActivelyVisible = useAppActivelyVisible();
    const { theme } = useUnistyles();
    const { settings } = useAppSettings();
@@ -43343,7 +43351,7 @@ index 3e987990358ceb285f29f9f780683270fa4eb43c..e65718c1462bac5d7df44d5e18799dfa
    const xtermTheme = useMemo(() => toXtermTheme(theme.colors.terminal), [theme]);
    const terminalFontFamily = useMemo(() => {
      const trimmed = settings.monoFontFamily.trim();
-@@ -229,6 +336,31 @@ export function TerminalPane({
+@@ -229,6 +337,31 @@ export function TerminalPane({
    });
    const [keyboardInset, setKeyboardInset] = useState(0);
    const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
@@ -43375,7 +43383,7 @@ index 3e987990358ceb285f29f9f780683270fa4eb43c..e65718c1462bac5d7df44d5e18799dfa
  
    const client = useHostRuntimeClient(serverId);
    const isConnected = useHostRuntimeIsConnected(serverId);
-@@ -318,6 +450,15 @@ export function TerminalPane({
+@@ -318,6 +451,23 @@ export function TerminalPane({
    const requestTerminalReflow = useCallback(() => {
      setResizeRequestToken((current) => current + 1);
    }, []);
@@ -43386,12 +43394,20 @@ index 3e987990358ceb285f29f9f780683270fa4eb43c..e65718c1462bac5d7df44d5e18799dfa
 +    lastSentTerminalSizeRef.current = null;
 +    requestTerminalReflow();
 +    emulatorRef.current?.claimSize();
-+    requestTerminalFocus();
-+  }, [layoutRequestToken, requestTerminalFocus, requestTerminalReflow]);
++    if (shouldRestoreTerminalFocusAfterLayout({ isMobile, isKeyboardVisible })) {
++      requestTerminalFocus();
++    }
++  }, [
++    isKeyboardVisible,
++    isMobile,
++    layoutRequestToken,
++    requestTerminalFocus,
++    requestTerminalReflow,
++  ]);
    useEffect(() => {
      if (!isMobile || !isWorkspaceFocused || mobileView === "agent") {
        return;
-@@ -412,18 +553,41 @@ export function TerminalPane({
+@@ -412,18 +562,41 @@ export function TerminalPane({
      keyboardRefitTimeoutsRef.current = [];
    }, []);
  
@@ -43445,7 +43461,7 @@ index 3e987990358ceb285f29f9f780683270fa4eb43c..e65718c1462bac5d7df44d5e18799dfa
  
    const handleKeyboardChange = useCallback(
      (nextShift: number) => {
-@@ -434,6 +598,62 @@ export function TerminalPane({
+@@ -434,6 +607,62 @@ export function TerminalPane({
      [isMobile, pulseKeyboardRefits],
    );
  
@@ -43508,7 +43524,7 @@ index 3e987990358ceb285f29f9f780683270fa4eb43c..e65718c1462bac5d7df44d5e18799dfa
    useEffect(() => {
      return () => clearKeyboardRefitTimeouts();
    }, [clearKeyboardRefitTimeouts]);
-@@ -844,6 +1064,14 @@ export function TerminalPane({
+@@ -844,6 +1073,14 @@ export function TerminalPane({
      terminalResizeDebouncer.schedule(nextResize);
    });
  
@@ -43523,7 +43539,7 @@ index 3e987990358ceb285f29f9f780683270fa4eb43c..e65718c1462bac5d7df44d5e18799dfa
    const handleTerminalKey = useCallback(
      async (input: { key: string; ctrl: boolean; shift: boolean; alt: boolean; meta: boolean }) => {
        sendTerminalKey(input);
-@@ -981,6 +1209,9 @@ export function TerminalPane({
+@@ -981,6 +1218,9 @@ export function TerminalPane({
      isNative,
    });
    const keyboardToggleIconColor = theme.colors.foregroundMuted;
@@ -43533,7 +43549,7 @@ index 3e987990358ceb285f29f9f780683270fa4eb43c..e65718c1462bac5d7df44d5e18799dfa
  
    const renderVirtualKeyboardControl = (control: TerminalVirtualKeyboardControl) => {
      const controlId = getTerminalVirtualKeyboardControlId(control);
-@@ -1019,6 +1250,25 @@ export function TerminalPane({
+@@ -1019,6 +1259,25 @@ export function TerminalPane({
              iconColor={keyboardToggleIconColor}
              isKeyboardVisible={isKeyboardToggleVisible}
              onToggle={handleKeyboardToggle}
@@ -43559,7 +43575,7 @@ index 3e987990358ceb285f29f9f780683270fa4eb43c..e65718c1462bac5d7df44d5e18799dfa
            />
          );
      }
-@@ -1052,7 +1302,7 @@ export function TerminalPane({
+@@ -1052,7 +1311,7 @@ export function TerminalPane({
              xtermTheme={xtermTheme}
              scrollbackLines={settings.terminalScrollbackLines}
              fontFamily={terminalFontFamily}
@@ -43568,7 +43584,7 @@ index 3e987990358ceb285f29f9f780683270fa4eb43c..e65718c1462bac5d7df44d5e18799dfa
              keyboardInset={keyboardInset}
              isKeyboardVisible={isKeyboardVisible}
              swipeGesturesEnabled={swipeGesturesEnabled}
-@@ -1061,6 +1311,7 @@ export function TerminalPane({
+@@ -1061,6 +1320,7 @@ export function TerminalPane({
              onSwipeRight={handleSwipeRight}
              onSwipeLeft={handleSwipeLeft}
              onInput={handleTerminalData}
@@ -43576,7 +43592,7 @@ index 3e987990358ceb285f29f9f780683270fa4eb43c..e65718c1462bac5d7df44d5e18799dfa
              onFocus={handleTerminalFocus}
              onResize={handleTerminalResize}
              onTerminalKey={handleTerminalKey}
-@@ -1099,7 +1350,7 @@ export function TerminalPane({
+@@ -1099,7 +1359,7 @@ export function TerminalPane({
        {isMobile ? (
          <View style={styles.keyboardContainer} testID="terminal-virtual-keyboard">
            <View style={styles.keyboardRows}>
@@ -43585,7 +43601,7 @@ index 3e987990358ceb285f29f9f780683270fa4eb43c..e65718c1462bac5d7df44d5e18799dfa
                <View
                  key={row.map(getTerminalVirtualKeyboardControlId).join(":")}
                  style={styles.keyboardRow}
-@@ -1158,10 +1409,10 @@ const styles = StyleSheet.create((theme) => ({
+@@ -1158,10 +1418,10 @@ const styles = StyleSheet.create((theme) => ({
      borderTopColor: theme.colors.border,
      backgroundColor: theme.colors.surface0,
      paddingHorizontal: theme.spacing[2],
@@ -43598,7 +43614,7 @@ index 3e987990358ceb285f29f9f780683270fa4eb43c..e65718c1462bac5d7df44d5e18799dfa
    },
    keyboardRow: {
      flexDirection: "row",
-@@ -1171,7 +1422,7 @@ const styles = StyleSheet.create((theme) => ({
+@@ -1171,7 +1431,7 @@ const styles = StyleSheet.create((theme) => ({
    keyButton: {
      flex: 1,
      minWidth: 0,
@@ -43607,7 +43623,7 @@ index 3e987990358ceb285f29f9f780683270fa4eb43c..e65718c1462bac5d7df44d5e18799dfa
      borderRadius: theme.borderRadius.md,
      borderWidth: 1,
      borderColor: theme.colors.border,
-@@ -1180,6 +1431,12 @@ const styles = StyleSheet.create((theme) => ({
+@@ -1180,6 +1440,12 @@ const styles = StyleSheet.create((theme) => ({
      paddingHorizontal: theme.spacing[1],
      backgroundColor: theme.colors.surface1,
    },
@@ -48682,7 +48698,7 @@ index 0000000000000000000000000000000000000000..6c8f25a02807a0c02e9718d24d500ee9
 +  },
 +}));
 diff --git a/packages/app/src/screens/open-project-screen.tsx b/packages/app/src/screens/open-project-screen.tsx
-index 11e90136bf1a7901eb1656c0059b8d6f90840bf0..ae4f8373daeccae72025ba90d629deef42f55dec 100644
+index 11e90136bf1a7901eb1656c0059b8d6f90840bf0..c2f0dbf0bc0d9e199465f73c7addf43795a84c82 100644
 --- a/packages/app/src/screens/open-project-screen.tsx
 +++ b/packages/app/src/screens/open-project-screen.tsx
 @@ -1,11 +1,10 @@
@@ -48717,7 +48733,7 @@ index 11e90136bf1a7901eb1656c0059b8d6f90840bf0..ae4f8373daeccae72025ba90d629deef
  import { useOpenProject } from "@/hooks/use-open-project";
  import type { Href } from "expo-router";
 +import { useSessionStore } from "@/stores/session-store";
-+import { openOrCreateHostTerminal } from "@/terminal/runtime/host-terminal";
++import { claimHostTerminalLaunch } from "@/terminal/runtime/host-terminal";
  
  export function OpenProjectScreen() {
    const { t } = useTranslation();
@@ -48729,7 +48745,7 @@ index 11e90136bf1a7901eb1656c0059b8d6f90840bf0..ae4f8373daeccae72025ba90d629deef
  
    const isCompactLayout = useIsCompactFormFactor();
  
-@@ -86,13 +92,68 @@ export function OpenProjectScreen() {
+@@ -86,13 +92,72 @@ export function OpenProjectScreen() {
      });
    }, [chooseHost, router]);
  
@@ -48758,7 +48774,11 @@ index 11e90136bf1a7901eb1656c0059b8d6f90840bf0..ae4f8373daeccae72025ba90d629deef
 +            }
 +            // Reopen the newest matching live terminal. A new process is created
 +            // only when the user explicitly taps a launcher and none is running.
-+            const terminal = await openOrCreateHostTerminal(client, { profileId });
++            const launch = claimHostTerminalLaunch(client, { profileId });
++            const terminal = await launch.result;
++            if (!launch.shouldNavigate) {
++              return;
++            }
 +            router.push(
 +              buildHostTerminalRoute(serverId, terminal.id, {
 +                cwd: terminal.cwd,
@@ -48799,7 +48819,7 @@ index 11e90136bf1a7901eb1656c0059b8d6f90840bf0..ae4f8373daeccae72025ba90d629deef
          </View>
          <View style={styles.tiles}>
            <HomeTile
-@@ -117,6 +178,20 @@ export function OpenProjectScreen() {
+@@ -117,6 +182,20 @@ export function OpenProjectScreen() {
              onPress={handleOpenProviders}
              testID="open-project-setup-providers"
            />
@@ -48820,7 +48840,7 @@ index 11e90136bf1a7901eb1656c0059b8d6f90840bf0..ae4f8373daeccae72025ba90d629deef
            {localServerId ? (
              <HomeTile
                icon={Smartphone}
-@@ -128,9 +203,6 @@ export function OpenProjectScreen() {
+@@ -128,9 +207,6 @@ export function OpenProjectScreen() {
            ) : null}
          </View>
        </View>
@@ -48830,7 +48850,7 @@ index 11e90136bf1a7901eb1656c0059b8d6f90840bf0..ae4f8373daeccae72025ba90d629deef
        <PairDeviceModal
          serverId={localServerId ?? ""}
          visible={isPairDeviceOpen}
-@@ -253,17 +325,4 @@ const styles = StyleSheet.create((theme) => ({
+@@ -253,17 +329,4 @@ const styles = StyleSheet.create((theme) => ({
      fontSize: theme.fontSize.base,
      lineHeight: 18,
    },
@@ -49324,8 +49344,79 @@ index 0000000000000000000000000000000000000000..1d2e63a6c78a38e5684e5378901c3e52
 +
 +  return hydrated;
 +}
+diff --git a/packages/app/src/stores/workspace-layout-actions.ts b/packages/app/src/stores/workspace-layout-actions.ts
+index 9496479f4e6d70f218739c5b5922f97f6e96f83d..f2c0e6fa0477f4933d3a59cdbfd748cbfcec1637 100644
+--- a/packages/app/src/stores/workspace-layout-actions.ts
++++ b/packages/app/src/stores/workspace-layout-actions.ts
+@@ -2406,6 +2406,51 @@ function seedDraftForEmptyWorkspace(input: {
+   );
+ }
+ 
++function restoreSingleKnownTerminalForEmptyWorkspace(input: {
++  layout: WorkspaceLayout;
++  snapshot: WorkspaceTabSnapshot;
++  activeAgentIds: Set<string>;
++  knownTerminalIds: Set<string>;
++  explorerSidebarPaneId: string | null;
++}): WorkspaceLayout {
++  const ready = input.snapshot.agentsHydrated && input.snapshot.terminalsHydrated;
++  const creatingContent =
++    input.snapshot.hasActivePendingDraftCreate === true ||
++    input.snapshot.hasActivePendingTerminalCreate === true;
++  const explorerTabIds = new Set(
++    input.explorerSidebarPaneId
++      ? (findPaneById(input.layout.root, input.explorerSidebarPaneId)?.tabIds ?? [])
++      : [],
++  );
++  const hasContentTab = collectAllTabs(input.layout.root).some(
++    (tab) => tab.target.kind !== "new_tab" && !explorerTabIds.has(tab.tabId),
++  );
++  if (
++    !ready ||
++    creatingContent ||
++    hasContentTab ||
++    input.activeAgentIds.size > 0 ||
++    input.knownTerminalIds.size !== 1
++  ) {
++    return input.layout;
++  }
++
++  const terminalId = input.knownTerminalIds.values().next().value;
++  if (!terminalId) {
++    return input.layout;
++  }
++  return (
++    createTabInLayout({
++      layout: input.layout,
++      target: { kind: "terminal", terminalId },
++      now: Date.now(),
++      placement: FOCUSED_PANE_PLACEMENT,
++      explorerSidebarPaneId: input.explorerSidebarPaneId,
++      createTabId: () => buildDeterministicWorkspaceTabId({ kind: "terminal", terminalId }),
++    })?.layout ?? input.layout
++  );
++}
++
+ export function reconcileWorkspaceTabs(
+   state: WorkspaceTabReconcileState,
+   snapshot: WorkspaceTabSnapshot,
+@@ -2494,6 +2539,14 @@ export function reconcileWorkspaceTabs(
+     explorerSidebarPaneId: state.explorerSidebarPaneId,
+   });
+ 
++  nextLayout = restoreSingleKnownTerminalForEmptyWorkspace({
++    layout: nextLayout,
++    snapshot,
++    activeAgentIds,
++    knownTerminalIds,
++    explorerSidebarPaneId: state.explorerSidebarPaneId,
++  });
++
+   nextLayout = seedDraftForEmptyWorkspace({
+     layout: nextLayout,
+     snapshot,
 diff --git a/packages/app/src/stores/workspace-layout-store.test.ts b/packages/app/src/stores/workspace-layout-store.test.ts
-index e53f9c1911596dfa9c13785122a6e0d56bb11339..ccb4cf85c82d71790a6965f1177639f3ac85f5bc 100644
+index e53f9c1911596dfa9c13785122a6e0d56bb11339..36bd78ef8fbc71468e201f17e564f7d82442fb50 100644
 --- a/packages/app/src/stores/workspace-layout-store.test.ts
 +++ b/packages/app/src/stores/workspace-layout-store.test.ts
 @@ -2958,6 +2958,40 @@ describe("workspace-layout-store actions", () => {
@@ -49369,6 +49460,48 @@ index e53f9c1911596dfa9c13785122a6e0d56bb11339..ccb4cf85c82d71790a6965f1177639f3
    it("hydrates duplicate Changes and Pull request instances without collapsing their ids or state", () => {
      const tabs = [
        {
+@@ -3621,7 +3655,7 @@ describe("workspace-layout-store actions", () => {
+     expect(findPaneById(layout.root, layout.focusedPaneId)?.focusedTabId).toBe(scriptTabId);
+   });
+ 
+-  it("reconcileTabs does not auto-open live non-standalone terminals", () => {
++  it("reconcileTabs restores the sole live terminal instead of defaulting to New Agent", () => {
+     const workspaceKey = createWorkspaceKey();
+ 
+     workspaceLayoutStore.getState().reconcileTabs(workspaceKey, {
+@@ -3635,6 +3669,32 @@ describe("workspace-layout-store actions", () => {
+       hasActivePendingDraftCreate: false,
+     });
+ 
++    const layout = workspaceLayoutStore.getState().layoutByWorkspace[workspaceKey];
++    expect(contentTabs(workspaceLayoutStore.getState().getWorkspaceTabs(workspaceKey))).toEqual([
++      expect.objectContaining({
++        tabId: "terminal_term-script",
++        target: { kind: "terminal", terminalId: "term-script" },
++      }),
++    ]);
++    expect(findPaneById(layout.root, layout.focusedPaneId)?.focusedTabId).toBe(
++      "terminal_term-script",
++    );
++  });
++
++  it("reconcileTabs does not guess among multiple live non-standalone terminals", () => {
++    const workspaceKey = createWorkspaceKey();
++
++    workspaceLayoutStore.getState().reconcileTabs(workspaceKey, {
++      agentsHydrated: true,
++      terminalsHydrated: true,
++      activeAgentIds: [],
++      autoOpenAgentIds: [],
++      knownAgentIds: [],
++      knownTerminalIds: ["term-script-a", "term-script-b"],
++      standaloneTerminalIds: [],
++      hasActivePendingDraftCreate: false,
++    });
++
+     expect(contentTabs(workspaceLayoutStore.getState().getWorkspaceTabs(workspaceKey))).toEqual([]);
+   });
+ 
 diff --git a/packages/app/src/styles/unistyles.ts b/packages/app/src/styles/unistyles.ts
 index b679d5e69442e4e2f1014442f129e087429edba8..29536ac7bca8ca1cb186de870d3e27aca1caee71 100644
 --- a/packages/app/src/styles/unistyles.ts
@@ -50256,10 +50389,10 @@ index 7f24dbf303fdf8acc4bd0009a6a51a5fab83718b..0100e5ec69307184bc1a35bb486a10fc
  });
 diff --git a/packages/app/src/terminal/runtime/host-terminal-screen-state.test.ts b/packages/app/src/terminal/runtime/host-terminal-screen-state.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..1bbbc6f170da01b53acdd169d5d2deb9aff3a6db
+index 0000000000000000000000000000000000000000..8a1a3429f05af444ea869b2b8b6bd80a4d2b9cc3
 --- /dev/null
 +++ b/packages/app/src/terminal/runtime/host-terminal-screen-state.test.ts
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,58 @@
 +import { describe, expect, it } from "vitest";
 +import { shouldRenderHostTerminal } from "./host-terminal-screen-state";
 +
@@ -50287,6 +50420,25 @@ index 0000000000000000000000000000000000000000..1bbbc6f170da01b53acdd169d5d2deb9
 +        hasCwd: true,
 +      }),
 +    ).toBe(true);
++    expect(
++      shouldRenderHostTerminal({
++        availability: "ready",
++        connectionStatus: "offline",
++        hasCwd: true,
++      }),
++    ).toBe(true);
++  });
++
++  it("does not resurrect a terminal rejected before the host disconnects", () => {
++    for (const availability of ["missing", "unsupported", "error"] as const) {
++      expect(
++        shouldRenderHostTerminal({
++          availability,
++          connectionStatus: "offline",
++          hasCwd: true,
++        }),
++      ).toBe(false);
++    }
 +  });
 +
 +  it("never renders without route cwd context", () => {
@@ -50301,10 +50453,10 @@ index 0000000000000000000000000000000000000000..1bbbc6f170da01b53acdd169d5d2deb9
 +});
 diff --git a/packages/app/src/terminal/runtime/host-terminal-screen-state.ts b/packages/app/src/terminal/runtime/host-terminal-screen-state.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..3c84bf2b9854357e31085083c875b380be1a34cf
+index 0000000000000000000000000000000000000000..705376066bd152014010baaf0821cc323f7c5c2a
 --- /dev/null
 +++ b/packages/app/src/terminal/runtime/host-terminal-screen-state.ts
-@@ -0,0 +1,9 @@
+@@ -0,0 +1,13 @@
 +export type HostTerminalAvailability = "checking" | "ready" | "missing" | "unsupported" | "error";
 +
 +export function shouldRenderHostTerminal(input: {
@@ -50312,17 +50464,21 @@ index 0000000000000000000000000000000000000000..3c84bf2b9854357e31085083c875b380
 +  connectionStatus: string;
 +  hasCwd: boolean;
 +}): boolean {
-+  return input.hasCwd && (input.availability === "ready" || input.connectionStatus !== "online");
++  return (
++    input.hasCwd &&
++    (input.availability === "ready" ||
++      (input.availability === "checking" && input.connectionStatus !== "online"))
++  );
 +}
 diff --git a/packages/app/src/terminal/runtime/host-terminal.test.ts b/packages/app/src/terminal/runtime/host-terminal.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..08dd010feb57d9c000b2099cab914cde9411ee83
+index 0000000000000000000000000000000000000000..678dca258aefbd212b7e63cfaca0788e0db688e8
 --- /dev/null
 +++ b/packages/app/src/terminal/runtime/host-terminal.test.ts
-@@ -0,0 +1,120 @@
+@@ -0,0 +1,151 @@
 +import { describe, expect, it, vi } from "vitest";
 +import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
-+import { openOrCreateHostTerminal } from "./host-terminal";
++import { claimHostTerminalLaunch, openOrCreateHostTerminal } from "./host-terminal";
 +
 +describe("openOrCreateHostTerminal", () => {
 +  it("reattaches the existing matching terminal instead of spawning a second writer", async () => {
@@ -50439,13 +50595,44 @@ index 0000000000000000000000000000000000000000..08dd010feb57d9c000b2099cab914cde
 +    ]);
 +    expect(createTerminal).toHaveBeenCalledTimes(1);
 +  });
++
++  it("allows only the first in-flight caller to navigate", async () => {
++    let resolveList!: (value: { cwd: string; terminals: []; requestId: string }) => void;
++    const listTerminals = vi.fn(
++      () =>
++        new Promise<{ cwd: string; terminals: []; requestId: string }>((resolve) => {
++          resolveList = resolve;
++        }),
++    );
++    const createTerminal = vi.fn(async () => ({
++      terminal: {
++        id: "host-new",
++        name: "Host terminal",
++        cwd: "C:\\Users\\K",
++        scope: "host" as const,
++        activity: null,
++      },
++      error: null,
++      requestId: "create-1",
++    }));
++    const client = { listTerminals, createTerminal } as unknown as DaemonClient;
++
++    const first = claimHostTerminalLaunch(client);
++    const second = claimHostTerminalLaunch(client);
++    expect(first.shouldNavigate).toBe(true);
++    expect(second.shouldNavigate).toBe(false);
++    expect(first.result).toBe(second.result);
++
++    resolveList({ cwd: "C:\\Users\\K", terminals: [], requestId: "list-1" });
++    await first.result;
++  });
 +});
 diff --git a/packages/app/src/terminal/runtime/host-terminal.ts b/packages/app/src/terminal/runtime/host-terminal.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..6fa91f331adefa1f092c36af7322263155771be3
+index 0000000000000000000000000000000000000000..70135f7d7a8d5b4e1d9791701dea58c124fded63
 --- /dev/null
 +++ b/packages/app/src/terminal/runtime/host-terminal.ts
-@@ -0,0 +1,110 @@
+@@ -0,0 +1,122 @@
 +import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 +import {
 +  DEFAULT_TERMINAL_PROFILES,
@@ -50463,6 +50650,11 @@ index 0000000000000000000000000000000000000000..6fa91f331adefa1f092c36af73222631
 +interface OpenHostTerminalOptions {
 +  profileId?: string;
 +  forceCreate?: boolean;
++}
++
++export interface HostTerminalLaunchClaim {
++  result: Promise<HostTerminalTarget>;
++  shouldNavigate: boolean;
 +}
 +
 +const pendingHostTerminalLaunches = new WeakMap<
@@ -50533,10 +50725,10 @@ index 0000000000000000000000000000000000000000..6fa91f331adefa1f092c36af73222631
 +  };
 +}
 +
-+export function openOrCreateHostTerminal(
++export function claimHostTerminalLaunch(
 +  client: DaemonClient,
 +  options: OpenHostTerminalOptions = {},
-+): Promise<HostTerminalTarget> {
++): HostTerminalLaunchClaim {
 +  let pendingByLaunch = pendingHostTerminalLaunches.get(client);
 +  if (!pendingByLaunch) {
 +    pendingByLaunch = new Map();
@@ -50545,7 +50737,7 @@ index 0000000000000000000000000000000000000000..6fa91f331adefa1f092c36af73222631
 +  const key = hostTerminalLaunchKey(options);
 +  const existing = pendingByLaunch.get(key);
 +  if (existing) {
-+    return existing;
++    return { result: existing, shouldNavigate: false };
 +  }
 +
 +  const launch = openOrCreateHostTerminalUnshared(client, options);
@@ -50554,7 +50746,51 @@ index 0000000000000000000000000000000000000000..6fa91f331adefa1f092c36af73222631
 +    if (pendingByLaunch?.get(key) === launch) pendingByLaunch.delete(key);
 +  };
 +  void launch.then(clearPending, clearPending);
-+  return launch;
++  return { result: launch, shouldNavigate: true };
++}
++
++export function openOrCreateHostTerminal(
++  client: DaemonClient,
++  options: OpenHostTerminalOptions = {},
++): Promise<HostTerminalTarget> {
++  return claimHostTerminalLaunch(client, options).result;
++}
+diff --git a/packages/app/src/terminal/runtime/terminal-layout-focus.test.ts b/packages/app/src/terminal/runtime/terminal-layout-focus.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..bf04fbfc423b9aa583e963f209752861cc1da8bc
+--- /dev/null
++++ b/packages/app/src/terminal/runtime/terminal-layout-focus.test.ts
+@@ -0,0 +1,19 @@
++import { describe, expect, it } from "vitest";
++import { shouldRestoreTerminalFocusAfterLayout } from "./terminal-layout-focus";
++
++describe("terminal layout focus", () => {
++  it("restores desktop typing focus after a layout transition", () => {
++    expect(
++      shouldRestoreTerminalFocusAfterLayout({ isMobile: false, isKeyboardVisible: false }),
++    ).toBe(true);
++  });
++
++  it("preserves hidden and visible mobile keyboard state", () => {
++    expect(
++      shouldRestoreTerminalFocusAfterLayout({ isMobile: true, isKeyboardVisible: false }),
++    ).toBe(false);
++    expect(shouldRestoreTerminalFocusAfterLayout({ isMobile: true, isKeyboardVisible: true })).toBe(
++      true,
++    );
++  });
++});
+diff --git a/packages/app/src/terminal/runtime/terminal-layout-focus.ts b/packages/app/src/terminal/runtime/terminal-layout-focus.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..3334c3ba8499759d00aeb39c3d8b38cebd0f32e0
+--- /dev/null
++++ b/packages/app/src/terminal/runtime/terminal-layout-focus.ts
+@@ -0,0 +1,6 @@
++export function shouldRestoreTerminalFocusAfterLayout(input: {
++  isMobile: boolean;
++  isKeyboardVisible: boolean;
++}): boolean {
++  return !input.isMobile || input.isKeyboardVisible;
 +}
 diff --git a/packages/app/src/terminal/runtime/terminal-mobile-font-preset.test.ts b/packages/app/src/terminal/runtime/terminal-mobile-font-preset.test.ts
 new file mode 100644
