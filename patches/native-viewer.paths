@@ -5,6 +5,8 @@ packages/client/src/daemon-client.ts
 packages/plugin
 packages/protocol/src/messages.create-terminal-size.test.ts
 packages/protocol/src/messages.ts
+packages/server/src/server/agent-attention-policy.test.ts
+packages/server/src/server/agent-attention-policy.ts
 packages/server/src/server/session.ts
 packages/server/src/server/websocket-server.ts
 packages/server/src/terminal/terminal-manager.ts

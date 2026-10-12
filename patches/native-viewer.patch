@@ -51910,6 +51910,151 @@ index 93f6be9ef91d84c88329f5ea7fe9ffa06d8846b3..be1c121fede50a614d667d6eb2b93da1
    title: z.string().optional(),
    activity: TerminalActivitySchema.nullable().optional(),
  });
+diff --git a/packages/server/src/server/agent-attention-policy.test.ts b/packages/server/src/server/agent-attention-policy.test.ts
+index ac9d92f16c6a1842d6a02ecece6f0c233f0fe556..ad5a011cb3f73c5a66953de004fc60c8a3439b78 100644
+--- a/packages/server/src/server/agent-attention-policy.test.ts
++++ b/packages/server/src/server/agent-attention-policy.test.ts
+@@ -8,6 +8,7 @@ import {
+ 
+ function state(overrides: Partial<ClientPresenceState>): ClientPresenceState {
+   return {
++    deviceType: "web",
+     appVisible: true,
+     focusedAgentId: null,
+     focusedTerminalId: null,
+@@ -21,6 +22,75 @@ describe("computeNotificationPlan", () => {
+   const staleAtMs = nowMs - PRESENCE_THRESHOLD_MS - 1;
+   const presentAtMs = nowMs - PRESENCE_THRESHOLD_MS + 1;
+ 
++  it("pushes immediately when a recently active phone is backgrounded", () => {
++    expect(
++      computeNotificationPlan({
++        allStates: [
++          state({
++            deviceType: "mobile",
++            appVisible: false,
++            focusedAgentId: "agent-1",
++            lastActivityAtMs: nowMs,
++          }),
++        ],
++        focusTarget: { kind: "agent", id: "agent-1" },
++        pushEligible: true,
++        nowMs,
++      }),
++    ).toEqual({ inAppRecipientIndex: null, shouldPush: true });
++  });
++
++  it("keeps a visible focused phone quiet", () => {
++    expect(
++      computeNotificationPlan({
++        allStates: [
++          state({ deviceType: "mobile", focusedAgentId: "agent-1", lastActivityAtMs: nowMs }),
++        ],
++        focusTarget: { kind: "agent", id: "agent-1" },
++        pushEligible: true,
++        nowMs,
++      }),
++    ).toEqual({ inAppRecipientIndex: null, shouldPush: false });
++  });
++
++  it("always pushes a new human-response request when a visible desktop is focused", () => {
++    expect(
++      computeNotificationPlan({
++        allStates: [state({ focusedAgentId: "agent-1", lastActivityAtMs: nowMs })],
++        focusTarget: { kind: "agent", id: "agent-1" },
++        pushEligible: true,
++        alwaysPush: true,
++        nowMs,
++      }),
++    ).toEqual({ inAppRecipientIndex: null, shouldPush: true });
++  });
++
++  it("always pushes when a recently active but hidden desktop would receive the in-app alert", () => {
++    expect(
++      computeNotificationPlan({
++        allStates: [state({ appVisible: false, lastActivityAtMs: presentAtMs })],
++        focusTarget: { kind: "agent", id: "agent-1" },
++        pushEligible: true,
++        alwaysPush: true,
++        nowMs,
++      }),
++    ).toEqual({ inAppRecipientIndex: 0, shouldPush: true });
++  });
++
++  it("lets an active desktop receive the alert instead of a newer background phone", () => {
++    expect(
++      computeNotificationPlan({
++        allStates: [
++          state({ lastActivityAtMs: nowMs - 1000 }),
++          state({ deviceType: "mobile", appVisible: false, lastActivityAtMs: nowMs }),
++        ],
++        focusTarget: { kind: "agent", id: "agent-1" },
++        pushEligible: true,
++        nowMs,
++      }),
++    ).toEqual({ inAppRecipientIndex: 0, shouldPush: false });
++  });
++
+   it("does not suppress notifications when a focused client is stale", () => {
+     const staleFocused = state({
+       focusedAgentId: "agent-1",
+diff --git a/packages/server/src/server/agent-attention-policy.ts b/packages/server/src/server/agent-attention-policy.ts
+index 98b3a4dcdb7edf751a3265963ad58239d695fe8c..ada70b2f5a294c7ac819ad3f4a72053439e5e82f 100644
+--- a/packages/server/src/server/agent-attention-policy.ts
++++ b/packages/server/src/server/agent-attention-policy.ts
+@@ -3,6 +3,7 @@ import type { AgentAttentionReason } from "@getpaseo/protocol/agent-attention-no
+ export const PRESENCE_THRESHOLD_MS = 180_000;
+ 
+ export interface ClientPresenceState {
++  deviceType: "web" | "mobile";
+   appVisible: boolean;
+   lastActivityAtMs: number | null;
+   focusedAgentId: string | null;
+@@ -23,6 +24,8 @@ interface ComputeNotificationPlanInput {
+   focusTarget: AttentionFocusTarget | null;
+   // Whether a push notification is allowed when no client is present.
+   pushEligible: boolean;
++  // Human-response requests must reach the phone even when a desktop client is present.
++  alwaysPush?: boolean;
+   nowMs: number;
+ }
+ 
+@@ -43,6 +46,7 @@ export function computeNotificationPlan({
+   allStates,
+   focusTarget,
+   pushEligible,
++  alwaysPush = false,
+   nowMs,
+ }: ComputeNotificationPlanInput): NotificationPlan {
+   let mostRecentPresentIndex: number | null = null;
+@@ -59,7 +63,13 @@ export function computeNotificationPlan({
+     }
+ 
+     if (state.appVisible && isFocusedOnTarget(state, focusTarget)) {
+-      return { inAppRecipientIndex: null, shouldPush: false };
++      return { inAppRecipientIndex: null, shouldPush: alwaysPush };
++    }
++
++    // Native clients cannot deliver OS notifications from the socket, and can
++    // suspend immediately after backgrounding. Keep web/desktop delivery intact.
++    if (state.deviceType === "mobile" && !state.appVisible) {
++      continue;
+     }
+ 
+     if (clampedActivityAtMs > mostRecentPresentAtMs) {
+@@ -69,10 +79,10 @@ export function computeNotificationPlan({
+   }
+ 
+   if (mostRecentPresentIndex !== null) {
+-    return { inAppRecipientIndex: mostRecentPresentIndex, shouldPush: false };
++    return { inAppRecipientIndex: mostRecentPresentIndex, shouldPush: alwaysPush };
+   }
+ 
+-  return { inAppRecipientIndex: null, shouldPush: pushEligible };
++  return { inAppRecipientIndex: null, shouldPush: alwaysPush || pushEligible };
+ }
+ 
+ export function isPushEligibleAttentionReason(reason: AgentAttentionReason): boolean {
 diff --git a/packages/server/src/server/session.ts b/packages/server/src/server/session.ts
 index 9c18299fcdc007cc10248b23442c4fa84b6f390d..ae2899abc19649e6684aaa3bac9d850aa0f31354 100644
 --- a/packages/server/src/server/session.ts
