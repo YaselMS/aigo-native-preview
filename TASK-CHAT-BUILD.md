@@ -6,7 +6,7 @@ Version 0.7.9, build 7009999, bundle `dev.aigo.taskchat.preview`, scheme
 The workflow applies the unchanged native viewer patch to upstream
 `9400a49af670fdb5db4af58e73f8df98588dbea9`, then the cumulative
 `gentle-task-chat.patch` from development source
-`b8e132c10ee78f961415ff481b83ed365f0ef741`. Do not also apply the historical
+`952a23e1738799e75bae5962d40c948cbd0dfc26`. Do not also apply the historical
 `gentle-live-client.patch`. Licenses and pinned dependencies are retained.
 
 Dispatch `ios-preview.yml` on this branch. It uses a standard public-repository

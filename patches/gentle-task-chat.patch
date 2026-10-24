@@ -457,7 +457,7 @@ index 0000000..e3bb407
 +        <View style={styles.header}>
 +          <Text style={styles.title}>{state.agent?.title ?? "Selected live task"}</Text>
 +          <Text style={styles.muted}>
-+            {state.hostname ?? "Connecting to PC"} � {state.connection} � one task, chat and
++            {state.hostname ?? "Connecting to PC"} · {state.connection} · one task, chat and
 +            questions
 +          </Text>
 +          <View style={styles.actions}>
@@ -588,7 +588,7 @@ index 0f2820b..8689b4e 100644
 +  it("explains live attachment and blocks repeated taps while attaching", async () => {
 +    const entry = createProviderSessionEntry({
 +      providerId: "gentle-live",
-+      title: "Live Gentle Shell � PC � PID 42",
++      title: "Live Gentle Shell · PC · PID 42",
 +    });
 +    const fetchRecentProviderSessions = vi.fn(async () => ({
 +      requestId: "live-list",
@@ -1222,7 +1222,7 @@ index 0000000..3c8bd0d
 +      <Text style={styles.text}>
 +        {status.enabled
 +          ? `Enabled until ${new Date(status.expiresAt!).toLocaleTimeString()}`
-+          : "Off - no phone access"}
++          : "Off — no phone access"}
 +      </Text>
 +      <Text style={styles.muted}>
 +        One selected task, one hour. The phone can read the selected chat, send prompts and answer
@@ -1822,7 +1822,7 @@ index 4350394..5c2a5f6 100644
        timeout: options?.timeout,
 diff --git a/packages/client/src/task-device-transport.ts b/packages/client/src/task-device-transport.ts
 new file mode 100644
-index 0000000..24e18da
+index 0000000..c806576
 --- /dev/null
 +++ b/packages/client/src/task-device-transport.ts
 @@ -0,0 +1,181 @@
@@ -1987,7 +1987,7 @@ index 0000000..24e18da
 +        [...active].map((base) => {
 +          let timer: ReturnType<typeof setTimeout> | undefined;
 +          const closed = new Promise<void>((resolve) => {
-+            base.onClose(resolve);
++            base.onClose(() => resolve());
 +          });
 +          const deadline = new Promise<void>((resolve) => {
 +            timer = setTimeout(resolve, 2000);
@@ -2749,9 +2749,9 @@ index 0000000..60da3fd
 +      {
 +        providerHandleId: `${descriptor.sessionId}:${descriptor.generation}`,
 +        cwd: snapshot.cwd,
-+        title: `${descriptor.launchOrigin === "aigo-background" ? "AiGo-started session (background)" : "Live Gentle Shell"} � ${hostname()} � PID ${descriptor.pid}`,
++        title: `${descriptor.launchOrigin === "aigo-background" ? "AiGo-started session (background)" : "Live Gentle Shell"} · ${hostname()} · PID ${descriptor.pid}`,
 +        firstPromptPreview: preview.slice(0, 160),
-+        lastPromptPreview: `${status} � Session ${descriptor.sessionId.slice(0, 12)} � ${preview.slice(0, 120)}`,
++        lastPromptPreview: `${status} · Session ${descriptor.sessionId.slice(0, 12)} · ${preview.slice(0, 120)}`,
 +        lastActivityAt: new Date(),
 +      },
 +    ];
@@ -3224,7 +3224,7 @@ index 0000000..171e66f
 +      type: "upsert",
 +      id: "gentle:child-1",
 +      status: "running",
-+      subtitle: "background � waiting � answer on PC",
++      subtitle: "background · waiting · answer on PC",
 +    },
 +  });
 +  expect(mapper.map(input)).toEqual([]);
@@ -3336,7 +3336,7 @@ index 0000000..8846f66
 +          title: task.agent,
 +          cwd: task.cwd,
 +          status,
-+          subtitle: `${task.mode} � ${task.status}${task.status === "waiting" ? " � answer on PC" : ""}`,
++          subtitle: `${task.mode} · ${task.status}${task.status === "waiting" ? " · answer on PC" : ""}`,
 +        },
 +      },
 +    ];

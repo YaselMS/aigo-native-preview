@@ -9,13 +9,13 @@ assert.equal(manifest.signed, false);
 assert.equal(manifest.remotePushEnabled, false);
 manifest.integration = {
   name: "gentle-task-chat",
-  sourceCommit: "b8e132c10ee78f961415ff481b83ed365f0ef741",
+  sourceCommit: "952a23e1738799e75bae5962d40c948cbd0dfc26",
   baselineCommit: "7b8e73b06b3f95463209b532e3e67fa77c97416b",
   patchSha256: createHash("sha256")
     .update(readFileSync("patches/gentle-task-chat.patch"))
     .digest("hex"),
   protocol: "task-device-v3",
-  matchingPcSourceCommit: "b8e132c10ee78f961415ff481b83ed365f0ef741",
+  matchingPcSourceCommit: "952a23e1738799e75bae5962d40c948cbd0dfc26",
   pairingEnabledInArtifact: false,
   qualification: "Selected-task chat client. Requires the matching default-off development PC host and explicit volatile pairing. Physical iPhone acceptance remains pending; desktop and push are unverified.",
 };
