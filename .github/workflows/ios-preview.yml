@@ -1,4 +1,4 @@
-name: Build unsigned AiGo Preview 7 for iPhone
+name: Build unsigned AiGo Gentle live client for iPhone
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: aigo-ios-preview
+  group: aigo-ios-gentle-live
   cancel-in-progress: false
 
 jobs:
@@ -47,6 +47,8 @@ jobs:
           test "$(git rev-parse HEAD)" = 9400a49af670fdb5db4af58e73f8df98588dbea9
           git apply --check ../patches/native-viewer.patch
           git apply ../patches/native-viewer.patch
+          git apply --check ../patches/gentle-live-client.patch
+          git apply ../patches/gentle-live-client.patch
 
       - name: Install pinned dependencies
         working-directory: paseo
@@ -68,6 +70,10 @@ jobs:
           npm run build:client
           npm run typecheck --workspace=@getpaseo/protocol --workspace=@getpaseo/client --workspace=@getpaseo/server --workspace=@getpaseo/app --workspace=@getpaseo/plugin
           npm run lint
+
+      - name: Check Gentle live client regressions
+        working-directory: paseo/packages/app
+        run: npm run test -- --project unit src/components/import-session-sheet.test.tsx src/components/question-form-card-core.test.ts src/panels/agent-tab-label.test.ts src/agent-stream/permission-response-feedback.test.tsx --bail=1
 
       - name: Check viewer navigation and plugin behavior
         run: |
@@ -100,10 +106,13 @@ jobs:
       - name: Archive an unsigned device build and package the IPA
         run: node scripts/archive-ios.mjs paseo "$RUNNER_TEMP/aigo-ios"
 
+      - name: Record integration source provenance
+        run: node scripts/record-gentle-build.mjs "$RUNNER_TEMP/aigo-ios/build-manifest.json"
+
       - name: Save only the IPA and build manifest
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: aigo-preview-7-unsigned-iphone
+          name: aigo-gentle-live-unsigned-iphone
           path: |
             ${{ runner.temp }}/aigo-ios/AiGo-Preview-unsigned.ipa
             ${{ runner.temp }}/aigo-ios/build-manifest.json

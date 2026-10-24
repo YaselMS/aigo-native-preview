@@ -1,0 +1,704 @@
+diff --git a/packages/app/src/agent-stream/permission-response-feedback.test.tsx b/packages/app/src/agent-stream/permission-response-feedback.test.tsx
+index 7297658..841b2ec 100644
+--- a/packages/app/src/agent-stream/permission-response-feedback.test.tsx
++++ b/packages/app/src/agent-stream/permission-response-feedback.test.tsx
+@@ -9,6 +9,12 @@ import { PermissionResponseFeedback } from "./permission-response-feedback";
+ import { QuestionFormCard } from "@/components/question-form-card";
+ import type { PendingPermission } from "@/types/shared";
+ 
++// Markdown rendering is exercised in the real Expo browser smoke. Keep this
++// card interaction suite independent of the native renderer's JSX dependencies.
++vi.mock("@/components/markdown/renderer", () => ({
++  MarkdownRenderer: ({ text }: { text: string }) => <div>{text}</div>,
++}));
++
+ const permission: PendingPermission = {
+   key: "agent:question",
+   agentId: "agent",
+@@ -25,12 +31,117 @@ const permission: PendingPermission = {
+ 
+ const i18n = createInstance();
+ const ignoreCheck = () => undefined;
++const batchPermission: PendingPermission = {
++  ...permission,
++  request: {
++    ...permission.request,
++    input: {
++      questions: [0, 1, 2].map((index) => ({
++        header: "Same",
++        answerKey: `gentle_q${index}`,
++        question: `Q${index}`,
++        multiSelect: index === 1,
++        allowOther: true,
++        options: [{ label: "Alpha, Beta" }, { label: "Gamma" }],
++      })),
++    },
++  },
++};
++const exact = {
++  ...permission,
++  request: {
++    ...permission.request,
++    input: {
++      questions: [
++        {
++          header: "Choice",
++          question: "Choose a value",
++          options: [{ label: "Final", value: "opaque:final" }],
++        },
++      ],
++    },
++  },
++};
++const withPreview = {
++  ...permission,
++  request: {
++    ...permission.request,
++    input: {
++      questions: [
++        {
++          header: "Q",
++          question: "Preview question",
++          options: [{ label: "Plan", preview: "**Original plan**" }],
++        },
++      ],
++    },
++  },
++};
+ beforeAll(async () => {
+   await i18n.use(initReactI18next).init({ lng: "en", resources: { en: { translation: en } } });
+ });
+ afterEach(cleanup);
+ 
+ describe("permission response feedback", () => {
++  it("expands preview without selecting or submitting and dismisses through deny", () => {
++    const respond = vi.fn();
++    render(
++      <I18nextProvider i18n={i18n}>
++        <QuestionFormCard permission={withPreview} onRespond={respond} isResponding={false} />
++      </I18nextProvider>,
++    );
++    fireEvent.click(screen.getByRole("button", { name: "Preview Plan" }));
++    expect(screen.getByText("**Original plan**")).toBeTruthy();
++    expect(screen.getByRole("radio", { name: "Plan" }).getAttribute("aria-checked")).toBe("false");
++    expect(respond).not.toHaveBeenCalled();
++    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
++    expect(respond.mock.calls[0][0]).toMatchObject({ behavior: "deny" });
++  });
++  it("submits batch single/multi/custom answers with stable indexed identities", () => {
++    const respond = vi.fn();
++    render(
++      <I18nextProvider i18n={i18n}>
++        <QuestionFormCard permission={batchPermission} onRespond={respond} isResponding={false} />
++      </I18nextProvider>,
++    );
++    fireEvent.click(screen.getByRole("radio", { name: "Alpha, Beta" }));
++    fireEvent.click(screen.getByRole("checkbox", { name: "Alpha, Beta" }));
++    fireEvent.click(screen.getByRole("checkbox", { name: "Gamma" }));
++    fireEvent.click(screen.getByRole("button", { name: "Next" }));
++    fireEvent.change(screen.getByRole("textbox", { name: "Q2" }), {
++      target: { value: "option:0, literal" },
++    });
++    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
++    expect(respond).toHaveBeenCalledTimes(1);
++    expect(respond.mock.calls[0]?.[0].updatedInput.answerDetails).toEqual([
++      { questionIndex: 0, optionIndices: [0] },
++      { questionIndex: 1, optionIndices: [0, 1] },
++      { questionIndex: 2, custom: "option:0, literal" },
++    ]);
++  });
++  it("selects an exact opaque choice with Space and ignores repeated or blocked keys", () => {
++    const respond = vi.fn();
++    const card = (blocked: boolean) => (
++      <I18nextProvider i18n={i18n}>
++        <QuestionFormCard
++          permission={exact}
++          onRespond={respond}
++          isResponding={false}
++          isResponseBlocked={blocked}
++        />
++      </I18nextProvider>
++    );
++    const { rerender } = render(card(false));
++    const option = screen.getByRole("radio", { name: "Final" });
++    fireEvent.keyDown(option, { key: " " });
++    fireEvent.keyDown(option, { key: " ", repeat: true });
++    expect(option.getAttribute("aria-checked")).toBe("true");
++    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
++    expect(respond.mock.calls[0]?.[0].updatedInput.answers).toEqual({ Choice: "opaque:final" });
++    rerender(card(true));
++    fireEvent.keyDown(option, { key: " " });
++    expect(option.getAttribute("aria-checked")).toBe("true");
++  });
+   it("keeps a completed question selection visible but blocks another submission when uncertain", () => {
+     const respond = vi.fn();
+     const card = (blocked: boolean) => (
+diff --git a/packages/app/src/agent-stream/view.tsx b/packages/app/src/agent-stream/view.tsx
+index 6c987da..3ef3dbb 100644
+--- a/packages/app/src/agent-stream/view.tsx
++++ b/packages/app/src/agent-stream/view.tsx
+@@ -1471,6 +1471,13 @@ function PermissionRequestCard({
+     },
+     onSuccess: (outcome, input) => {
+       if (outcome !== "complete" && outcome !== "stale") return;
++      // Status recovery may follow a lost stream update as well as a lost ack.
++      // Reconcile the authoritative tail so the resumed reply appears without reload.
++      void getHostRuntimeStore()
++        .fetchAgentTimeline(input.serverId, input.agentId, planTimelineTailFetch())
++        .catch((error) =>
++          console.error("[PermissionRequestCard] Timeline recovery failed:", error),
++        );
+       useSessionStore.getState().setPendingPermissions(input.serverId, (current) => {
+         const next = new Map(current);
+         for (const [key, pending] of next) {
+diff --git a/packages/app/src/components/import-session-sheet.test.tsx b/packages/app/src/components/import-session-sheet.test.tsx
+index 0f2820b..8689b4e 100644
+--- a/packages/app/src/components/import-session-sheet.test.tsx
++++ b/packages/app/src/components/import-session-sheet.test.tsx
+@@ -840,6 +840,41 @@ describe("ImportSessionSheet", () => {
+     expect(onClose).toHaveBeenCalledTimes(1);
+   });
+ 
++  it("explains live attachment and blocks repeated taps while attaching", async () => {
++    const entry = createProviderSessionEntry({
++      providerId: "gentle-live",
++      title: "Live Gentle Shell · PC · PID 42",
++    });
++    const fetchRecentProviderSessions = vi.fn(async () => ({
++      requestId: "live-list",
++      entries: [entry],
++    }));
++    let finish = (_value: ReturnType<typeof createImportedAgentSnapshot>) => {};
++    const importAgent = vi.fn(
++      () =>
++        new Promise<ReturnType<typeof createImportedAgentSnapshot>>((resolve) => {
++          finish = resolve;
++        }),
++    );
++    renderSheet(
++      { fetchRecentProviderSessions, importAgent } as Pick<
++        DaemonClient,
++        "fetchRecentProviderSessions" | "importAgent"
++      >,
++      { snapshot: { supportsSnapshot: true, entries: [createSnapshotEntry("gentle-live")] } },
++    );
++    expect((await screen.findByTestId("live-attachment-explanation")).textContent).toContain(
++      "running Gentle Shell process",
++    );
++    const row = await screen.findByTestId(
++      `import-session-session-gentle-live-${entry.providerHandleId}`,
++    );
++    fireEvent.click(row);
++    fireEvent.click(row);
++    await waitFor(() => expect(importAgent).toHaveBeenCalledTimes(1));
++    finish(createImportedAgentSnapshot("live-attached"));
++    await waitFor(() => expect(importAgent).toHaveBeenCalledTimes(1));
++  });
+   it("refetches sessions when the refresh button is clicked", async () => {
+     const fetchRecentProviderSessions = vi.fn(async () => ({
+       requestId: "recent-provider-sessions",
+diff --git a/packages/app/src/components/import-session-sheet.tsx b/packages/app/src/components/import-session-sheet.tsx
+index 21b81b2..c994c41 100644
+--- a/packages/app/src/components/import-session-sheet.tsx
++++ b/packages/app/src/components/import-session-sheet.tsx
+@@ -292,10 +292,12 @@ export function ImportSessionSheet({
+     () => buildProviderLabelMap(snapshotEntries),
+     [snapshotEntries],
+   );
++  const hasLiveBridge = providersToFetch?.includes("gentle-live") ?? false;
++  const attaching = useRef(false);
+ 
+   const sessionsQueryRoot = useMemo(
+-    () => ["recent-provider-sessions", cwd ?? null] as const,
+-    [cwd],
++    () => ["recent-provider-sessions", serverId, cwd ?? null] as const,
++    [serverId, cwd],
+   );
+ 
+   const queriesConfig = useMemo(
+@@ -437,7 +439,13 @@ export function ImportSessionSheet({
+ 
+   const handleImportSession = useCallback(
+     (entry: FetchRecentProviderSessionEntry) => {
+-      importMutation.mutate(entry);
++      if (attaching.current) return;
++      attaching.current = true;
++      importMutation.mutate(entry, {
++        onSettled: () => {
++          attaching.current = false;
++        },
++      });
+     },
+     [importMutation],
+   );
+@@ -455,10 +463,10 @@ export function ImportSessionSheet({
+ 
+   const header = useMemo<SheetHeader>(
+     () => ({
+-      title: t("importSession.title"),
++      title: hasLiveBridge ? "Attach a live task" : t("importSession.title"),
+       actions: <RefreshAction isRefreshing={isRefreshing} onPress={handleRefresh} />,
+     }),
+-    [isRefreshing, handleRefresh, t],
++    [hasLiveBridge, isRefreshing, handleRefresh, t],
+   );
+ 
+   const isSnapshotUnsupported = requiresHostUpgrade;
+@@ -483,6 +491,13 @@ export function ImportSessionSheet({
+     providerLabelById,
+   });
+   const showFilter = filterProviders.length > 1;
++  let resolvedEmptyTitle = emptyStateTitle;
++  if (hasLiveBridge && showEmptyState) {
++    resolvedEmptyTitle =
++      totalAlreadyImportedCount > 0
++        ? "This live task is already attached. Open it from History."
++        : "No live Gentle task is available. Check the PC session and refresh.";
++  }
+ 
+   return (
+     <AdaptiveModalSheet
+@@ -493,6 +508,13 @@ export function ImportSessionSheet({
+       desktopMaxWidth={560}
+       snapPoints={IMPORT_SHEET_SNAP_POINTS}
+     >
++      {hasLiveBridge ? (
++        <Text style={styles.statusText} testID="live-attachment-explanation">
++          Attach to the running Gentle Shell process shown below. Answers resume this exact task. If
++          it is unavailable, check the PC session and refresh. Already attached tasks are in
++          History.
++        </Text>
++      ) : null}
+       {showFilter ? (
+         <View ref={filterAnchorRef} collapsable={false} style={styles.filterTriggerWrap}>
+           <Pressable
+@@ -554,7 +576,7 @@ export function ImportSessionSheet({
+           ))}
+         </View>
+       ) : null}
+-      {showEmptyState ? <SheetEmptyState title={emptyStateTitle} /> : null}
++      {showEmptyState ? <SheetEmptyState title={resolvedEmptyTitle} /> : null}
+     </AdaptiveModalSheet>
+   );
+ }
+diff --git a/packages/app/src/components/question-form-card-core.test.ts b/packages/app/src/components/question-form-card-core.test.ts
+index 7feb268..1625146 100644
+--- a/packages/app/src/components/question-form-card-core.test.ts
++++ b/packages/app/src/components/question-form-card-core.test.ts
+@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
+ import {
+   areQuestionsAnswered,
+   buildQuestionFormAnswers,
++  buildQuestionFormAnswerDetails,
+   parseQuestionFormQuestions,
+   questionShowsTextInput,
+   resolveDismissLabel,
+@@ -9,6 +10,64 @@ import {
+ } from "./question-form-card-core";
+ 
+ describe("question form card core", () => {
++  test("retains authored markdown preview separately from opaque answer identity", () => {
++    const q = parseQuestionFormQuestions({
++      questions: [
++        {
++          question: "Pick",
++          header: "Q",
++          options: [{ label: "A", value: "opaque", preview: "**Plan**\n- step" }],
++        },
++      ],
++    })!;
++    expect(q[0].options[0].preview).toBe("**Plan**\n- step");
++    expect(buildQuestionFormAnswers(q, { 0: new Set([0]) }, {})).toEqual({ Q: "opaque" });
++  });
++  test("batch answer identity preserves repeated headers and custom text separately from comma labels", () => {
++    const questions = parseQuestionFormQuestions({
++      questions: [0, 1, 2].map((i) => ({
++        question: `Q${i}`,
++        header: "Same",
++        answerKey: `q${i}`,
++        multiSelect: i === 1,
++        allowOther: true,
++        options: [{ label: "Alpha, Beta" }, { label: "Gamma" }],
++      })),
++    })!;
++    const selections = { 0: new Set([0]), 1: new Set([1, 0]) };
++    const custom = { 2: "option:0, literal" };
++    expect(buildQuestionFormAnswers(questions, selections, custom)).toEqual({
++      q0: "Alpha, Beta",
++      q1: "Gamma, Alpha, Beta",
++      q2: "option:0, literal",
++    });
++    expect(buildQuestionFormAnswerDetails(questions, selections, custom)).toEqual({
++      answerDetails: [
++        { questionIndex: 0, optionIndices: [0] },
++        { questionIndex: 1, optionIndices: [0, 1] },
++        { questionIndex: 2, custom: "option:0, literal" },
++      ],
++    });
++  });
++  test("shows original duplicate labels while submitting the selected opaque identity", () => {
++    const questions = parseQuestionFormQuestions({
++      questions: [
++        {
++          header: "Response",
++          question: "Pick one",
++          options: [
++            { label: "Same", description: "first", value: "opaque:first" },
++            { label: "Same", description: "second", value: "opaque:second" },
++          ],
++        },
++      ],
++    });
++    if (!questions) throw new Error("questions did not parse");
++    expect(questions[0].options.map((o) => o.label)).toEqual(["Same", "Same"]);
++    expect(buildQuestionFormAnswers(questions, { 0: new Set([1]) }, {})).toEqual({
++      Response: "opaque:second",
++    });
++  });
+   test("treats optional input prompts as skippable empty answers", () => {
+     const questions = parseQuestionFormQuestions({
+       questions: [
+diff --git a/packages/app/src/components/question-form-card-core.ts b/packages/app/src/components/question-form-card-core.ts
+index 3924a5a..3e3fadb 100644
+--- a/packages/app/src/components/question-form-card-core.ts
++++ b/packages/app/src/components/question-form-card-core.ts
+@@ -1,11 +1,16 @@
+ export interface QuestionOption {
+   label: string;
+   description?: string;
++  /** Provider-owned answer identity; display labels remain unchanged. */
++  value?: string;
++  preview?: string;
+ }
+ 
+ export interface QuestionFormQuestion {
+   question: string;
+   header: string;
++  /** Stable provider key when visible headers can repeat. */
++  answerKey?: string;
+   options: QuestionOption[];
+   multiSelect: boolean;
+   allowOther: boolean;
+@@ -46,11 +51,14 @@ export function parseQuestionFormQuestions(input: unknown): QuestionFormQuestion
+       options.push({
+         label: o.label,
+         description: typeof o.description === "string" ? o.description : undefined,
++        ...(typeof o.value === "string" ? { value: o.value } : {}),
++        preview: readOptionalString(o, "preview"),
+       });
+     }
+     questions.push({
+       question: q.question,
+       header: q.header,
++      ...(typeof q.answerKey === "string" ? { answerKey: q.answerKey } : {}),
+       options,
+       multiSelect: q.multiSelect === true,
+       allowOther: q.allowOther === true || q.isOther === true,
+@@ -109,28 +117,49 @@ export function buildQuestionFormAnswers(
+   const answers: Record<string, string> = {};
+   for (let i = 0; i < questions.length; i++) {
+     const q = questions[i];
++    const key = q.answerKey ?? q.header;
+     const selected = selections[i];
+     const otherText = otherTexts[i]?.trim();
+ 
+     if (questionShowsTextInput(q)) {
+       if (otherText && otherText.length > 0) {
+-        answers[q.header] = otherText;
++        answers[key] = otherText;
+         continue;
+       }
+       if (q.allowEmpty && q.options.length === 0) {
+-        answers[q.header] = "";
++        answers[key] = "";
+         continue;
+       }
+     }
+ 
+     if (selected && selected.size > 0) {
+-      const labels = Array.from(selected).map((idx) => q.options[idx].label);
+-      answers[q.header] = labels.join(", ");
++      const labels = Array.from(selected).map(
++        (idx) => q.options[idx].value ?? q.options[idx].label,
++      );
++      answers[key] = labels.join(", ");
+     }
+   }
+   return answers;
+ }
+ 
++export function buildQuestionFormAnswerDetails(
++  questions: QuestionFormQuestion[],
++  selections: QuestionSelections,
++  otherTexts: QuestionOtherTexts,
++) {
++  if (!questions.some((q) => q.answerKey)) return {};
++  return {
++    answerDetails: questions.map((q, questionIndex) => {
++      const custom = otherTexts[questionIndex]?.trim();
++      if (q.allowOther && custom) return { questionIndex, custom };
++      return {
++        questionIndex,
++        optionIndices: [...(selections[questionIndex] ?? [])].sort((a, b) => a - b),
++      };
++    }),
++  };
++}
++
+ export function shouldSubmitEmptyOnDismiss(questions: QuestionFormQuestion[]): boolean {
+   return (
+     questions.length > 0 &&
+diff --git a/packages/app/src/components/question-form-card.tsx b/packages/app/src/components/question-form-card.tsx
+index 0ee8441..c705bc3 100644
+--- a/packages/app/src/components/question-form-card.tsx
++++ b/packages/app/src/components/question-form-card.tsx
+@@ -9,9 +9,12 @@ import type { PendingPermission } from "@/types/shared";
+ import type { AgentPermissionResponse } from "@getpaseo/protocol/agent-types";
+ import { isWeb } from "@/constants/platform";
+ import { EditingTextInput as TextInput } from "@/components/ui/text-input";
++import { MarkdownRenderer } from "@/components/markdown/renderer";
++import { createMarkdownParser } from "@/utils/markdown-parser";
+ import {
+   areQuestionsAnswered,
+   buildQuestionFormAnswers,
++  buildQuestionFormAnswerDetails,
+   isQuestionAnswered,
+   parseQuestionFormQuestions,
+   questionShowsTextInput,
+@@ -29,6 +32,15 @@ interface QuestionFormCardProps {
+ }
+ 
+ const IS_WEB = isWeb;
++const blockPreviewLink = () => false;
++// Previews are local tool content. Never fetch images or activate embedded links.
++const previewParser = createMarkdownParser({ linkify: false }).disable([
++  "image",
++  "link",
++  "autolink",
++  "html_block",
++  "html_inline",
++]);
+ 
+ function getQuestionInputPlaceholder({
+   question,
+@@ -64,10 +76,21 @@ function QuestionOptionRow({
+   onToggle,
+ }: QuestionOptionRowProps) {
+   const { theme } = useUnistyles();
++  const [previewOpen, setPreviewOpen] = useState(false);
++  const togglePreview = useCallback(() => setPreviewOpen((open) => !open), []);
++  const previewAccessibility = useMemo(() => ({ expanded: previewOpen }), [previewOpen]);
+ 
+   const handlePress = useCallback(() => {
+     onToggle(qIndex, optIndex, multiSelect);
+   }, [onToggle, qIndex, optIndex, multiSelect]);
++  const handleKeyDown = useCallback(
++    (event: React.KeyboardEvent) => {
++      if (event.key !== " " || isResponding || multiSelect) return;
++      event.preventDefault();
++      if (!event.repeat) handlePress();
++    },
++    [handlePress, isResponding, multiSelect],
++  );
+ 
+   const pressableStyle = useCallback(
+     ({ pressed, hovered }: PressableStateCallbackType & { hovered?: boolean }) => [
+@@ -109,30 +132,58 @@ function QuestionOptionRow({
+   );
+ 
+   return (
+-    <Pressable
+-      style={pressableStyle}
+-      onPress={handlePress}
+-      disabled={isResponding}
+-      accessibilityRole={multiSelect ? "checkbox" : "radio"}
+-      accessibilityLabel={option.label}
+-      accessibilityState={accessibilityState}
+-      aria-checked={isSelected}
+-    >
+-      <View style={styles.optionItemContent}>
+-        <View style={controlStyle}>
+-          {isSelected && multiSelect ? (
+-            <Check size={12} color={theme.colors.accentForeground} />
+-          ) : null}
+-          {isSelected && !multiSelect ? <View style={radioDotStyle} /> : null}
++    <View>
++      <Pressable
++        style={pressableStyle}
++        onPress={handlePress}
++        {...(IS_WEB ? { onKeyDown: handleKeyDown } : {})}
++        disabled={isResponding}
++        accessibilityRole={multiSelect ? "checkbox" : "radio"}
++        accessibilityLabel={option.label}
++        accessibilityState={accessibilityState}
++        aria-checked={isSelected}
++      >
++        <View style={styles.optionItemContent}>
++          <View style={controlStyle}>
++            {isSelected && multiSelect ? (
++              <Check size={12} color={theme.colors.accentForeground} />
++            ) : null}
++            {isSelected && !multiSelect ? <View style={radioDotStyle} /> : null}
++          </View>
++          <View style={styles.optionTextBlock}>
++            <Text style={optionLabelStyle}>{option.label}</Text>
++            {option.description ? (
++              <Text style={optionDescriptionStyle}>{option.description}</Text>
++            ) : null}
++          </View>
+         </View>
+-        <View style={styles.optionTextBlock}>
+-          <Text style={optionLabelStyle}>{option.label}</Text>
+-          {option.description ? (
+-            <Text style={optionDescriptionStyle}>{option.description}</Text>
++      </Pressable>
++      {option.preview ? (
++        <>
++          <Pressable
++            onPress={togglePreview}
++            disabled={isResponding}
++            accessibilityRole="button"
++            accessibilityLabel={`Preview ${option.label}`}
++            accessibilityState={previewAccessibility}
++            style={styles.optionItem}
++          >
++            <Text style={optionDescriptionStyle}>{previewOpen ? "Hide preview" : "Preview"}</Text>
++          </Pressable>
++          {previewOpen ? (
++            <View style={styles.optionItem} testID={`question-preview-${qIndex}-${optIndex}`}>
++              <MarkdownRenderer
++                text={option.preview}
++                compact
++                markdownit={previewParser}
++                enableHtmlish={false}
++                onLinkPress={blockPreviewLink}
++              />
++            </View>
+           ) : null}
+-        </View>
+-      </View>
+-    </Pressable>
++        </>
++      ) : null}
++    </View>
+   );
+ }
+ 
+@@ -240,7 +291,7 @@ function QuestionNav({
+     >
+       {questions.map((question, qIndex) => (
+         <QuestionNavButton
+-          key={question.header}
++          key={question.answerKey ?? `${qIndex}:${question.header}`}
+           index={qIndex}
+           total={questions.length}
+           header={question.header}
+@@ -407,6 +458,7 @@ export function QuestionFormCard({
+       updatedInput: {
+         ...permission.request.input,
+         answers: buildQuestionFormAnswers(questions, selections, otherTexts),
++        ...buildQuestionFormAnswerDetails(questions, selections, otherTexts),
+       },
+     });
+   }, [
+@@ -555,7 +607,7 @@ export function QuestionFormCard({
+             <View style={styles.optionsWrap} {...optionsGroupAccessibility}>
+               {activeQuestion.options.map((opt, optIndex) => (
+                 <QuestionOptionRow
+-                  key={opt.label}
++                  key={opt.value ?? `${optIndex}:${opt.label}`}
+                   qIndex={resolvedActiveQuestionIndex}
+                   optIndex={optIndex}
+                   option={opt}
+diff --git a/packages/app/src/composer/input/input.tsx b/packages/app/src/composer/input/input.tsx
+index fc8a260..607ba2c 100644
+--- a/packages/app/src/composer/input/input.tsx
++++ b/packages/app/src/composer/input/input.tsx
+@@ -53,6 +53,7 @@ import type { MessageInputKeyboardActionKind } from "@/keyboard/actions";
+ import { isImeComposingKeyboardEvent } from "@/utils/keyboard-ime";
+ import { isWeb } from "@/constants/platform";
+ import { useIsCompactFormFactor } from "@/constants/layout";
++import { useKeyboardShortcutsAvailable } from "@/keyboard/availability";
+ import { useComposerKeyboardScope } from "@/composer/keyboard-scope";
+ import { RenderProfile } from "@/utils/render-profiler";
+ import { useComposerHeight } from "./height";
+@@ -617,7 +618,9 @@ function FocusHint({
+   label: string;
+ }) {
+   const { isActiveComposer } = useComposerKeyboardScope();
+-  if (!isActiveComposer || !visible || !focusInputKeys || !label.trim()) return null;
++  const shortcutsAvailable = useKeyboardShortcutsAvailable();
++  if (!shortcutsAvailable || !isActiveComposer || !visible || !focusInputKeys || !label.trim())
++    return null;
+   return (
+     <Text style={styles.focusHintText} pointerEvents="none">
+       {label}
+diff --git a/packages/app/src/panels/agent-panel.tsx b/packages/app/src/panels/agent-panel.tsx
+index 5156ee8..47083aa 100644
+--- a/packages/app/src/panels/agent-panel.tsx
++++ b/packages/app/src/panels/agent-panel.tsx
+@@ -1,5 +1,6 @@
+ import { Button } from "@/components/ui/button";
+ import { LoadingSpinner } from "@/components/ui/loading-spinner";
++import { resolveAgentTabLabel } from "./agent-tab-label";
+ import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+ import type { TFunction } from "i18next";
+ import { SquarePen } from "lucide-react-native";
+@@ -275,20 +276,6 @@ function formatProviderLabel(provider: Agent["provider"]): string {
+     .join(" ");
+ }
+ 
+-function resolveWorkspaceAgentTabLabel(title: string | null | undefined): string | null {
+-  if (typeof title !== "string") {
+-    return null;
+-  }
+-  const normalized = title.trim();
+-  if (!normalized) {
+-    return null;
+-  }
+-  if (normalized.toLowerCase() === "new agent") {
+-    return null;
+-  }
+-  return normalized;
+-}
+-
+ function shouldStoreFetchedAgentInActiveDirectory(agent: Agent): boolean {
+   return !agent.archivedAt && Boolean(agent.projectPlacement);
+ }
+@@ -361,7 +348,7 @@ function useAgentPanelDescriptor(
+     }),
+   );
+   const provider = descriptorState.provider;
+-  const label = resolveWorkspaceAgentTabLabel(descriptorState.title);
++  const label = resolveAgentTabLabel(descriptorState.title, provider);
+   const icon = getProviderIcon(provider);
+ 
+   return {
+diff --git a/packages/app/src/panels/agent-tab-label.test.ts b/packages/app/src/panels/agent-tab-label.test.ts
+new file mode 100644
+index 0000000..5b522d6
+--- /dev/null
++++ b/packages/app/src/panels/agent-tab-label.test.ts
+@@ -0,0 +1,8 @@
++import { expect, test } from "vitest";
++import { resolveAgentTabLabel } from "./agent-tab-label";
++test("live attached tasks have a stable title before any generated title exists", () => {
++  for (const title of [null, undefined, "", "  ", "New agent"])
++    expect(resolveAgentTabLabel(title, "gentle-live")).toBe("Live Gentle Shell");
++  expect(resolveAgentTabLabel("My task", "gentle-live")).toBe("My task");
++  expect(resolveAgentTabLabel(null, "pi")).toBeNull();
++});
+diff --git a/packages/app/src/panels/agent-tab-label.ts b/packages/app/src/panels/agent-tab-label.ts
+new file mode 100644
+index 0000000..71dc456
+--- /dev/null
++++ b/packages/app/src/panels/agent-tab-label.ts
+@@ -0,0 +1,8 @@
++export function resolveAgentTabLabel(
++  title: string | null | undefined,
++  provider: string,
++): string | null {
++  const trimmed = title?.trim();
++  if (trimmed && trimmed.toLowerCase() !== "new agent") return trimmed;
++  return provider === "gentle-live" ? "Live Gentle Shell" : null;
++}
