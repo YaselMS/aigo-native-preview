@@ -1,4 +1,4 @@
-name: Build unsigned AiGo Gentle live client for iPhone
+name: Build unsigned AiGo Task Chat for iPhone
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: aigo-ios-gentle-live
+  group: aigo-ios-task-chat
   cancel-in-progress: false
 
 jobs:
@@ -19,6 +19,7 @@ jobs:
     env:
       CI: "1"
       AIGO_PREVIEW_BUILD: "1"
+      AIGO_TASK_CHAT_BUILD: "1"
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       ONNXRUNTIME_NODE_INSTALL: skip
       LEFTHOOK: "0"
@@ -47,8 +48,8 @@ jobs:
           test "$(git rev-parse HEAD)" = 9400a49af670fdb5db4af58e73f8df98588dbea9
           git apply --check ../patches/native-viewer.patch
           git apply ../patches/native-viewer.patch
-          git apply --check ../patches/gentle-live-client.patch
-          git apply ../patches/gentle-live-client.patch
+          git apply --check ../patches/gentle-task-chat.patch
+          git apply ../patches/gentle-task-chat.patch
 
       - name: Install pinned dependencies
         working-directory: paseo
@@ -73,7 +74,11 @@ jobs:
 
       - name: Check Gentle live client regressions
         working-directory: paseo/packages/app
-        run: npm run test -- --project unit src/components/import-session-sheet.test.tsx src/components/question-form-card-core.test.ts src/panels/agent-tab-label.test.ts src/agent-stream/permission-response-feedback.test.tsx --bail=1
+        run: npm run test -- --project unit src/task-chat/session.test.ts src/components/import-session-sheet.test.tsx src/components/question-form-card-core.test.ts src/panels/agent-tab-label.test.ts src/agent-stream/permission-response-feedback.test.tsx --bail=1
+
+      - name: Check task admission and encrypted reconnect
+        working-directory: paseo/packages/server
+        run: npx vitest run src/server/authorization/task-pairing-controller.test.ts src/server/authorization/device-admission.test.ts src/server/authorization/device-transport.test.ts src/server/authorization/index.test.ts src/server/websocket-server.relay-reconnect.test.ts --bail=1
 
       - name: Check viewer navigation and plugin behavior
         run: |
@@ -112,9 +117,9 @@ jobs:
       - name: Save only the IPA and build manifest
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: aigo-gentle-live-unsigned-iphone
+          name: aigo-task-chat-0.7.9-unsigned-iphone
           path: |
-            ${{ runner.temp }}/aigo-ios/AiGo-Preview-unsigned.ipa
+            ${{ runner.temp }}/aigo-ios/AiGo-Task-Chat-0.7.9-unsigned.ipa
             ${{ runner.temp }}/aigo-ios/build-manifest.json
           if-no-files-found: error
           retention-days: 1

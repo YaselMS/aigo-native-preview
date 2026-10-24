@@ -78,10 +78,10 @@ run("xcodebuild", [
 
 const application = exactlyOne(join(archive, "Products", "Applications"), ".app");
 const info = plist(join(application, "Info.plist"));
-assert.equal(info.CFBundleIdentifier, "dev.aigo.preview");
-assert.equal(info.CFBundleDisplayName, "AiGo");
-assert.equal(info.CFBundleShortVersionString, "0.7.8");
-assert.equal(info.CFBundleVersion, "7008999");
+assert.equal(info.CFBundleIdentifier, "dev.aigo.taskchat.preview");
+assert.equal(info.CFBundleDisplayName, "AiGo Task Chat");
+assert.equal(info.CFBundleShortVersionString, "0.7.9");
+assert.equal(info.CFBundleVersion, "7009999");
 assert.ok(info.UISupportedInterfaceOrientations?.includes("UIInterfaceOrientationLandscapeLeft"));
 assert.ok(info.UISupportedInterfaceOrientations?.includes("UIInterfaceOrientationLandscapeRight"));
 assert.ok(info.CFBundleSupportedPlatforms?.includes("iPhoneOS"), "Expected a physical-device app.");
@@ -92,13 +92,13 @@ assert.ok(architectures.split(/\s+/).includes("arm64"), "The app is missing the 
 const payload = join(output, "Payload");
 mkdirSync(payload);
 cpSync(application, join(payload, basename(application)), { recursive: true, dereference: false });
-const ipa = join(output, "AiGo-Preview-unsigned.ipa");
+const ipa = join(output, "AiGo-Task-Chat-0.7.9-unsigned.ipa");
 run("ditto", ["-c", "-k", "--keepParent", "Payload", basename(ipa)], output);
 writeFileSync(join(output, "build-manifest.json"), `${JSON.stringify({
-  app: "AiGo",
-  previewLabel: "AiGo Preview 7",
+  app: "AiGo Task Chat",
+  previewLabel: "AiGo Task Chat Preview 8",
   displayName: info.CFBundleDisplayName,
-  preview: 7,
+  preview: 8,
   bundleIdentifier: info.CFBundleIdentifier,
   upstreamCommit: upstream,
   buildKitCommit: process.env.GITHUB_SHA ?? null,
@@ -109,7 +109,7 @@ writeFileSync(join(output, "build-manifest.json"), `${JSON.stringify({
   architectures,
   signed: false,
   remotePushEnabled: false,
-  notificationDiagnostics: true,
+  notificationDiagnostics: false,
   requestedApnsEnvironment: "production",
   sha256: createHash("sha256").update(readFileSync(ipa)).digest("hex"),
   xcode: run("xcodebuild", ["-version"], appDirectory, true),
