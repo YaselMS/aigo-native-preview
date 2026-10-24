@@ -20,6 +20,7 @@ jobs:
       CI: "1"
       AIGO_PREVIEW_BUILD: "1"
       AIGO_TASK_CHAT_BUILD: "1"
+      npm_config_cache: ${{ runner.temp }}/aigo-task-chat-npm-cache
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       ONNXRUNTIME_NODE_INSTALL: skip
       LEFTHOOK: "0"
