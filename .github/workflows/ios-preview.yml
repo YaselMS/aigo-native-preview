@@ -65,6 +65,7 @@ jobs:
         working-directory: paseo
         run: |
           npm run build:app-deps
+          npm run build:relay
           npm run build:terminal-webview --workspace=@getpaseo/app
 
       - name: Check app, protocol, client and server types and lint
